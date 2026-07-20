@@ -1,0 +1,61 @@
+name: Pollux
+
+options:
+  minimumXcodeGenVersion: 2.45.0
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: 5.10
+    MARKETING_VERSION: 0.1.0
+    CURRENT_PROJECT_VERSION: 1
+    CODE_SIGN_STYLE: Automatic
+    GENERATE_INFOPLIST_FILE: YES
+    ENABLE_HARDENED_RUNTIME: YES
+    LD_RUNPATH_SEARCH_PATHS:
+      - $(inherited)
+      - "@executable_path/../Frameworks"
+
+targets:
+  Pollux:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_NAME: Pollux
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.mabino.pollux
+        INFOPLIST_KEY_CFBundleDisplayName: Pollux
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.entertainment
+        INFOPLIST_KEY_LSMinimumSystemVersion: "14.0"
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: YES
+        INFOPLIST_KEY_NSSupportsAutomaticTermination: YES
+        INFOPLIST_KEY_NSSupportsSuddenTermination: YES
+
+  PolluxTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Pollux
+    settings:
+      base:
+        PRODUCT_NAME: PolluxTests
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.mabino.pollux.tests
+
+schemes:
+  Pollux:
+    build:
+      targets:
+        Pollux: all
+        PolluxTests: [test]
+    run:
+      config: Debug
+    test:
+      gatherCoverageData: true
+      targets:
+        - name: PolluxTests

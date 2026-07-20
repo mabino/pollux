@@ -1,0 +1,465 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0A849BF3F3E3EA9DA2BDAFE7 /* PermissionsRequiredView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1CB44B02D64E9B46786BE2F /* PermissionsRequiredView.swift */; };
+		1B03CE0885F9A5C121E6D377 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D981465B752B8448E0DECF /* SettingsView.swift */; };
+		2EEB7DA6701596CB78D418B6 /* PlayerWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F9DCE7059DDE7EEA0CDF901 /* PlayerWindowView.swift */; };
+		3BFE022FF6F207E34A35CB82 /* StreamSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977ADF7E6066D6815495C684 /* StreamSupport.swift */; };
+		51A34130206DBBBC802F2773 /* PermissionSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D970E5A08CE26A55EEF0BDDC /* PermissionSupport.swift */; };
+		554C1B49F02CB39124CD13EF /* PolluxAppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 119F4ED4D5EED5C04EFE1F95 /* PolluxAppModel.swift */; };
+		578F3842CC1D3D4A059EA4DF /* BrowserStreamExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3061F5FC78AA16A480FEDBC /* BrowserStreamExtractor.swift */; };
+		5CB90FB0972A6DCA5233FE11 /* PolluxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2F5AC0710188F958CCFA9F /* PolluxApp.swift */; };
+		64C021061D87A8B3CC445542 /* FFprobeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B7CD110198385718C925B5F /* FFprobeService.swift */; };
+		686C17841F9279AF6F5FCA30 /* SupportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6AF7D04B080E5CF53029ADE /* SupportViews.swift */; };
+		BB25FFA94D693842CA9B79C1 /* AVPlayerViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFF11F262B703FDD428E65B2 /* AVPlayerViewContainer.swift */; };
+		C7CD6CBABDEFE48E434B6ACD /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63C53E2715FC9D52E9BF14B4 /* MainWindowView.swift */; };
+		CAFE9693B3667491E54C0C76 /* PolluxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050852061A287A26D1564790 /* PolluxTests.swift */; };
+		EA65FB4FBE89FAFC7194192A /* StreamProxyServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9123BDEDE3CC75926D4C0B /* StreamProxyServer.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		FF23F183EEC55E2BDF4EED51 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FBAF18ADB02ADD5A4704B0BB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8A7BB4C5AE23357C095FB6D2;
+			remoteInfo = Pollux;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		050852061A287A26D1564790 /* PolluxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolluxTests.swift; sourceTree = "<group>"; };
+		119F4ED4D5EED5C04EFE1F95 /* PolluxAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolluxAppModel.swift; sourceTree = "<group>"; };
+		12D981465B752B8448E0DECF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		4B7CD110198385718C925B5F /* FFprobeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FFprobeService.swift; sourceTree = "<group>"; };
+		63C53E2715FC9D52E9BF14B4 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
+		6E9123BDEDE3CC75926D4C0B /* StreamProxyServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamProxyServer.swift; sourceTree = "<group>"; };
+		6F9DCE7059DDE7EEA0CDF901 /* PlayerWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerWindowView.swift; sourceTree = "<group>"; };
+		7DB2106D50BF65B7876E39DF /* Pollux.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pollux.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		83A94E2CC30C8E740E332767 /* PolluxTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PolluxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		977ADF7E6066D6815495C684 /* StreamSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamSupport.swift; sourceTree = "<group>"; };
+		C3061F5FC78AA16A480FEDBC /* BrowserStreamExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserStreamExtractor.swift; sourceTree = "<group>"; };
+		CFF11F262B703FDD428E65B2 /* AVPlayerViewContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVPlayerViewContainer.swift; sourceTree = "<group>"; };
+		D1CB44B02D64E9B46786BE2F /* PermissionsRequiredView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionsRequiredView.swift; sourceTree = "<group>"; };
+		D970E5A08CE26A55EEF0BDDC /* PermissionSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionSupport.swift; sourceTree = "<group>"; };
+		E6AF7D04B080E5CF53029ADE /* SupportViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupportViews.swift; sourceTree = "<group>"; };
+		EC2F5AC0710188F958CCFA9F /* PolluxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolluxApp.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1DFE4C135903A5928289BC10 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7DB2106D50BF65B7876E39DF /* Pollux.app */,
+				83A94E2CC30C8E740E332767 /* PolluxTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		4B7334445D8A732552538269 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				050852061A287A26D1564790 /* PolluxTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		8225E31AC4C6FB9558F0B23B = {
+			isa = PBXGroup;
+			children = (
+				9C17FC9CBC6438E9F193D19C /* Sources */,
+				4B7334445D8A732552538269 /* Tests */,
+				1DFE4C135903A5928289BC10 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9C17FC9CBC6438E9F193D19C /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				CFF11F262B703FDD428E65B2 /* AVPlayerViewContainer.swift */,
+				C3061F5FC78AA16A480FEDBC /* BrowserStreamExtractor.swift */,
+				4B7CD110198385718C925B5F /* FFprobeService.swift */,
+				63C53E2715FC9D52E9BF14B4 /* MainWindowView.swift */,
+				D1CB44B02D64E9B46786BE2F /* PermissionsRequiredView.swift */,
+				D970E5A08CE26A55EEF0BDDC /* PermissionSupport.swift */,
+				6F9DCE7059DDE7EEA0CDF901 /* PlayerWindowView.swift */,
+				EC2F5AC0710188F958CCFA9F /* PolluxApp.swift */,
+				119F4ED4D5EED5C04EFE1F95 /* PolluxAppModel.swift */,
+				12D981465B752B8448E0DECF /* SettingsView.swift */,
+				6E9123BDEDE3CC75926D4C0B /* StreamProxyServer.swift */,
+				977ADF7E6066D6815495C684 /* StreamSupport.swift */,
+				E6AF7D04B080E5CF53029ADE /* SupportViews.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0BB1DBA5381DEC111C567CAB /* PolluxTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C11FF382EB59A57E00DE0CA5 /* Build configuration list for PBXNativeTarget "PolluxTests" */;
+			buildPhases = (
+				F5CED90D5BB364A8C0E7536F /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2C711E591F01C8FA3A6C5B39 /* PBXTargetDependency */,
+			);
+			name = PolluxTests;
+			packageProductDependencies = (
+			);
+			productName = PolluxTests;
+			productReference = 83A94E2CC30C8E740E332767 /* PolluxTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		8A7BB4C5AE23357C095FB6D2 /* Pollux */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D2E610D5426515DBC47AE83A /* Build configuration list for PBXNativeTarget "Pollux" */;
+			buildPhases = (
+				787D177E372A9AEE39CAA3AF /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Pollux;
+			packageProductDependencies = (
+			);
+			productName = Pollux;
+			productReference = 7DB2106D50BF65B7876E39DF /* Pollux.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		FBAF18ADB02ADD5A4704B0BB /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					0BB1DBA5381DEC111C567CAB = {
+						ProvisioningStyle = Automatic;
+					};
+					8A7BB4C5AE23357C095FB6D2 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 0DBA6A479131956E65F8E548 /* Build configuration list for PBXProject "Pollux" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 8225E31AC4C6FB9558F0B23B;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 1DFE4C135903A5928289BC10 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8A7BB4C5AE23357C095FB6D2 /* Pollux */,
+				0BB1DBA5381DEC111C567CAB /* PolluxTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		787D177E372A9AEE39CAA3AF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB25FFA94D693842CA9B79C1 /* AVPlayerViewContainer.swift in Sources */,
+				578F3842CC1D3D4A059EA4DF /* BrowserStreamExtractor.swift in Sources */,
+				64C021061D87A8B3CC445542 /* FFprobeService.swift in Sources */,
+				C7CD6CBABDEFE48E434B6ACD /* MainWindowView.swift in Sources */,
+				51A34130206DBBBC802F2773 /* PermissionSupport.swift in Sources */,
+				0A849BF3F3E3EA9DA2BDAFE7 /* PermissionsRequiredView.swift in Sources */,
+				2EEB7DA6701596CB78D418B6 /* PlayerWindowView.swift in Sources */,
+				5CB90FB0972A6DCA5233FE11 /* PolluxApp.swift in Sources */,
+				554C1B49F02CB39124CD13EF /* PolluxAppModel.swift in Sources */,
+				1B03CE0885F9A5C121E6D377 /* SettingsView.swift in Sources */,
+				EA65FB4FBE89FAFC7194192A /* StreamProxyServer.swift in Sources */,
+				3BFE022FF6F207E34A35CB82 /* StreamSupport.swift in Sources */,
+				686C17841F9279AF6F5FCA30 /* SupportViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F5CED90D5BB364A8C0E7536F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				CAFE9693B3667491E54C0C76 /* PolluxTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		2C711E591F01C8FA3A6C5B39 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8A7BB4C5AE23357C095FB6D2 /* Pollux */;
+			targetProxy = FF23F183EEC55E2BDF4EED51 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0E3F377A66774318F3191C3D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Pollux;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
+				INFOPLIST_KEY_LSMinimumSystemVersion = 14.0;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
+				INFOPLIST_KEY_NSSupportsAutomaticTermination = YES;
+				INFOPLIST_KEY_NSSupportsSuddenTermination = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.mabino.pollux;
+				PRODUCT_NAME = Pollux;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		62E9353BE940DDEC38870DBF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.mabino.pollux.tests;
+				PRODUCT_NAME = PolluxTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Pollux.app/Contents/MacOS/Pollux";
+			};
+			name = Release;
+		};
+		6D45051554B6A7EF910D3D05 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.1;
+			};
+			name = Debug;
+		};
+		BA7CC2384D336E9E29475650 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.mabino.pollux.tests;
+				PRODUCT_NAME = PolluxTests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Pollux.app/Contents/MacOS/Pollux";
+			};
+			name = Debug;
+		};
+		D31E03220D51FB2ABCC9CCB2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.1;
+			};
+			name = Release;
+		};
+		EC87CDE17322CC5E8641DE7E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Pollux;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
+				INFOPLIST_KEY_LSMinimumSystemVersion = 14.0;
+				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
+				INFOPLIST_KEY_NSSupportsAutomaticTermination = YES;
+				INFOPLIST_KEY_NSSupportsSuddenTermination = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.mabino.pollux;
+				PRODUCT_NAME = Pollux;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0DBA6A479131956E65F8E548 /* Build configuration list for PBXProject "Pollux" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6D45051554B6A7EF910D3D05 /* Debug */,
+				D31E03220D51FB2ABCC9CCB2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C11FF382EB59A57E00DE0CA5 /* Build configuration list for PBXNativeTarget "PolluxTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BA7CC2384D336E9E29475650 /* Debug */,
+				62E9353BE940DDEC38870DBF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D2E610D5426515DBC47AE83A /* Build configuration list for PBXNativeTarget "Pollux" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EC87CDE17322CC5E8641DE7E /* Debug */,
+				0E3F377A66774318F3191C3D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = FBAF18ADB02ADD5A4704B0BB /* Project object */;
+}
