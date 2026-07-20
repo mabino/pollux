@@ -17,6 +17,7 @@
 		5CB90FB0972A6DCA5233FE11 /* PolluxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC2F5AC0710188F958CCFA9F /* PolluxApp.swift */; };
 		64C021061D87A8B3CC445542 /* FFprobeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B7CD110198385718C925B5F /* FFprobeService.swift */; };
 		686C17841F9279AF6F5FCA30 /* SupportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6AF7D04B080E5CF53029ADE /* SupportViews.swift */; };
+		85172557BCE023615EE89E17 /* StreamInfoWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DE8B910F999C456FB54C747 /* StreamInfoWindowView.swift */; };
 		BB25FFA94D693842CA9B79C1 /* AVPlayerViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFF11F262B703FDD428E65B2 /* AVPlayerViewContainer.swift */; };
 		C7CD6CBABDEFE48E434B6ACD /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63C53E2715FC9D52E9BF14B4 /* MainWindowView.swift */; };
 		CAFE9693B3667491E54C0C76 /* PolluxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050852061A287A26D1564790 /* PolluxTests.swift */; };
@@ -39,6 +40,7 @@
 		12D981465B752B8448E0DECF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		4B7CD110198385718C925B5F /* FFprobeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FFprobeService.swift; sourceTree = "<group>"; };
 		63C53E2715FC9D52E9BF14B4 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
+		6DE8B910F999C456FB54C747 /* StreamInfoWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamInfoWindowView.swift; sourceTree = "<group>"; };
 		6E9123BDEDE3CC75926D4C0B /* StreamProxyServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamProxyServer.swift; sourceTree = "<group>"; };
 		6F9DCE7059DDE7EEA0CDF901 /* PlayerWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerWindowView.swift; sourceTree = "<group>"; };
 		7DB2106D50BF65B7876E39DF /* Pollux.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pollux.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -92,6 +94,7 @@
 				EC2F5AC0710188F958CCFA9F /* PolluxApp.swift */,
 				119F4ED4D5EED5C04EFE1F95 /* PolluxAppModel.swift */,
 				12D981465B752B8448E0DECF /* SettingsView.swift */,
+				6DE8B910F999C456FB54C747 /* StreamInfoWindowView.swift */,
 				6E9123BDEDE3CC75926D4C0B /* StreamProxyServer.swift */,
 				977ADF7E6066D6815495C684 /* StreamSupport.swift */,
 				E6AF7D04B080E5CF53029ADE /* SupportViews.swift */,
@@ -189,6 +192,7 @@
 				5CB90FB0972A6DCA5233FE11 /* PolluxApp.swift in Sources */,
 				554C1B49F02CB39124CD13EF /* PolluxAppModel.swift in Sources */,
 				1B03CE0885F9A5C121E6D377 /* SettingsView.swift in Sources */,
+				85172557BCE023615EE89E17 /* StreamInfoWindowView.swift in Sources */,
 				EA65FB4FBE89FAFC7194192A /* StreamProxyServer.swift in Sources */,
 				3BFE022FF6F207E34A35CB82 /* StreamSupport.swift in Sources */,
 				686C17841F9279AF6F5FCA30 /* SupportViews.swift in Sources */,

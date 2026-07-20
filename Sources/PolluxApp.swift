@@ -11,6 +11,9 @@ struct PolluxApp: App {
         }
         .windowResizability(.contentSize)
         .defaultSize(width: 540, height: 160)
+        .commands {
+            PolluxCommands()
+        }
 
         Settings {
             SettingsView()
@@ -22,5 +25,24 @@ struct PolluxApp: App {
                 .environmentObject(model)
         }
         .defaultSize(width: 1100, height: 720)
+
+        Window("Stream Info", id: PolluxAppModel.infoWindowID) {
+            StreamInfoWindowView()
+                .environmentObject(model)
+        }
+        .defaultSize(width: 550, height: 260)
+    }
+}
+
+struct PolluxCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button("Get Info") {
+                openWindow(id: PolluxAppModel.infoWindowID)
+            }
+            .keyboardShortcut("i", modifiers: [.command])
+        }
     }
 }

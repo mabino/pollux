@@ -24,9 +24,13 @@ struct MainWindowView: View {
                                 Label(model.isExtracting ? "Extracting…" : "Play Stream", systemImage: model.isExtracting ? "hourglass" : "play.fill")
                             }
                             .keyboardShortcut(.defaultAction)
-                            .disabled(model.isExtracting || model.pageURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(model.isExtracting || model.player != nil || model.pageURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                             if model.player != nil {
+                                Button("Open Player Window") {
+                                    openWindow(id: PolluxAppModel.playerWindowID)
+                                }
+
                                 Button("Stop Playback", role: .destructive) {
                                     model.stopPlayback()
                                 }
@@ -37,39 +41,9 @@ struct MainWindowView: View {
                     if let error = model.lastError {
                         UserFacingErrorCard(error: error)
                     }
-
-                    if let sourcePageURL = model.sourcePageURL, let extractedStreamURL = model.extractedStreamURL {
-                        GroupBox("Current Session") {
-                            VStack(alignment: .leading, spacing: 8) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Source Page")
-                                        .font(.caption.weight(.semibold))
-                                    Text(sourcePageURL.absoluteString)
-                                        .font(.caption.monospaced())
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
-                                }
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Extracted Stream")
-                                        .font(.caption.weight(.semibold))
-                                    Text(extractedStreamURL.absoluteString)
-                                        .font(.caption.monospaced())
-                                        .foregroundStyle(.secondary)
-                                        .textSelection(.enabled)
-                                }
-
-                                Button("Open Player Window") {
-                                    openWindow(id: PolluxAppModel.playerWindowID)
-                                }
-                                .font(.footnote)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
                 }
                 .padding(18)
-                .frame(minWidth: 500, minHeight: 140)
+                .frame(minWidth: 500, minHeight: 120)
             }
         }
         .onAppear {
