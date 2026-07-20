@@ -92,6 +92,12 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                 return
             }
 
+            try? await session.click(x: profile.centerX, y: profile.centerY)
+
+            if await collector.hasHits() {
+                return
+            }
+
             try? await session.bypassTurnstile(
                 solveTimeout: settings.turnstileSolveTimeout,
                 retryTimeout: settings.turnstileRetryTimeout

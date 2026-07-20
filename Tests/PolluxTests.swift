@@ -137,4 +137,13 @@ final class PolluxTests: XCTestCase {
         XCTAssertNil(cleaned["host"])
         XCTAssertEqual(cleaned["User-Agent"], "TestUA")
     }
+
+    func testInvestigateMLB() async throws {
+        let pageURL = try XCTUnwrap(URL(string: "https://jack23eo.mpcourageny9i9zzipper.my/baseball/major-league-baseball-2196986/cleveland-guardians-vs-minnesota-twins.html?icg=VVM&ilang=en"))
+        let profile = BrowserProfile.random()
+        let session = try await ChromeBrowserSession.launch(profile: profile) { _, _ in }
+        defer { Task { await session.close() } }
+        try await session.navigate(to: pageURL, timeout: 15)
+        XCTAssertNotNil(session.currentURL)
+    }
 }
