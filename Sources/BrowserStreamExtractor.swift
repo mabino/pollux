@@ -5,18 +5,45 @@ final class BrowserStreamExtractor: @unchecked Sendable {
     private let settings = ExtractionSettings()
 
     func extractPlayableStream(from sourcePageURL: URL) async throws -> ExtractedStream {
+        Task { @MainActor in
+            ExtractionLogger.shared.clear()
+            ExtractionLogger.shared.append("Starting stream extraction for \(sourcePageURL.absoluteString)")
+        }
+
         let profile = BrowserProfile.random()
         let collector = CaptureCollector(patterns: settings.capturePatterns, maxCandidates: settings.maxCandidates)
         let session = try await ChromeBrowserSession.launch(profile: profile) { method, params in
             await collector.handleEvent(method: method, paramsData: params)
+            if method == "Network.requestWillBeSent",
+               let dict = try? JSONSerialization.jsonObject(with: params) as? [String: Any],
+               let req = dict["request"] as? [String: Any],
+               let url = req["url"] as? String {
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("CDP Request: \(url)")
+                }
+            } else if method == "Network.responseReceived",
+                      let dict = try? JSONSerialization.jsonObject(with: params) as? [String: Any],
+                      let response = dict["response"] as? [String: Any],
+                      let url = response["url"] as? String,
+                      let status = response["status"] as? Int {
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("CDP Response [\(status)]: \(url)")
+                }
+            }
         }
 
         do {
             return try await withTimeout(seconds: settings.extractionTimeout) { [self] in
                 do {
+                    Task { @MainActor in
+                        ExtractionLogger.shared.append("Navigating browser to \(sourcePageURL.absoluteString)...")
+                    }
                     try await session.navigate(to: sourcePageURL, timeout: self.settings.browserTimeout)
                 } catch {
                     if !(await collector.hasHits()) {
+                        Task { @MainActor in
+                            ExtractionLogger.shared.append("Navigation error: \(error.localizedDescription)")
+                        }
                         throw error
                     }
                 }
@@ -27,7 +54,14 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     collectionWindow: self.settings.collectionWindow
                 )
                 guard !entries.isEmpty else {
+                    Task { @MainActor in
+                        ExtractionLogger.shared.append("No matching media stream requests captured.")
+                    }
                     throw PolluxError.noStreamCaptured(sourcePageURL)
+                }
+
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("Captured \(entries.count) media candidate request(s). Fetching cookies and playlists...")
                 }
 
                 let cookies = try await session.cookies()
@@ -40,10 +74,21 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     userAgent: profile.userAgent
                 )
                 guard !candidates.isEmpty else {
+                    Task { @MainActor in
+                        ExtractionLogger.shared.append("No valid candidates constructed from network entries.")
+                    }
                     throw PolluxError.noStreamCaptured(sourcePageURL)
                 }
 
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("Validating candidates with ffprobe...")
+                }
+
                 let selection = try await self.selectBestCandidate(from: candidates, cachedPlaylists: cachedPlaylists)
+
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("SUCCESS: Selected stream (\(selection.kind)) at \(selection.candidate.url.absoluteString)")
+                }
 
                 return ExtractedStream(
                     sourcePageURL: sourcePageURL,
@@ -55,8 +100,17 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     session: session
                 )
             }
+        } catch is TimeoutError {
+            await session.close()
+            Task { @MainActor in
+                ExtractionLogger.shared.append("Extraction timed out after \(Int(self.settings.extractionTimeout)) seconds.")
+            }
+            throw PolluxError.extractionTimedOut(sourcePageURL, self.settings.extractionTimeout)
         } catch {
             await session.close()
+            Task { @MainActor in
+                ExtractionLogger.shared.append("Extraction failed: \(error.localizedDescription)")
+            }
             if let polluxError = error as? PolluxError {
                 throw polluxError
             }
@@ -1521,6 +1575,8 @@ private func headerMap(from rawHeaders: Any?) -> [String: String] {
     return headers
 }
 
+struct TimeoutError: Error, Sendable {}
+
 private func withTimeout<T: Sendable>(
     seconds: TimeInterval,
     operation: @escaping @Sendable () async throws -> T
@@ -1531,7 +1587,7 @@ private func withTimeout<T: Sendable>(
         }
         group.addTask {
             try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            throw PolluxError.unexpected("Stream extraction timed out after \(Int(seconds)) seconds.")
+            throw TimeoutError()
         }
 
         guard let value = try await group.next() else {

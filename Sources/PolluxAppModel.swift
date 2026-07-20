@@ -6,6 +6,7 @@ import Foundation
 final class PolluxAppModel: ObservableObject {
     static let playerWindowID = "pollux-player-window"
     static let infoWindowID = "pollux-info-window"
+    static let logWindowID = "pollux-log-window"
 
     @Published var pageURLString: String
     @Published var isExtracting = false

@@ -17,6 +17,7 @@ enum PolluxError: Error, Sendable {
     case noPlayableStream
     case proxyStartFailed(String)
     case playbackFailed(String)
+    case extractionTimedOut(URL, TimeInterval)
     case unexpected(String)
 }
 
@@ -88,6 +89,12 @@ extension PolluxError {
             return UserFacingError(
                 title: "The extracted stream couldn't be opened",
                 message: sanitizedReason(reason, fallback: "AVPlayer rejected the extracted stream.")
+            )
+
+        case .extractionTimedOut(let url, let seconds):
+            return UserFacingError(
+                title: "Stream extraction timed out",
+                message: "Extraction timed out after \(Int(seconds)) seconds for \(url.absoluteString). Check the Extraction Log under Window > Extraction Log for details."
             )
 
         case .unexpected(let reason):

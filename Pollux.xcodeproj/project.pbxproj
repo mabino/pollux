@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		05E6C649CBB042F1F0ED2729 /* ExtractionLogWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34B081E6597C0E8CAEF26C74 /* ExtractionLogWindowView.swift */; };
 		0A849BF3F3E3EA9DA2BDAFE7 /* PermissionsRequiredView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1CB44B02D64E9B46786BE2F /* PermissionsRequiredView.swift */; };
 		1B03CE0885F9A5C121E6D377 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D981465B752B8448E0DECF /* SettingsView.swift */; };
 		2EEB7DA6701596CB78D418B6 /* PlayerWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F9DCE7059DDE7EEA0CDF901 /* PlayerWindowView.swift */; };
@@ -22,6 +23,7 @@
 		C7CD6CBABDEFE48E434B6ACD /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63C53E2715FC9D52E9BF14B4 /* MainWindowView.swift */; };
 		CAFE9693B3667491E54C0C76 /* PolluxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050852061A287A26D1564790 /* PolluxTests.swift */; };
 		EA65FB4FBE89FAFC7194192A /* StreamProxyServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E9123BDEDE3CC75926D4C0B /* StreamProxyServer.swift */; };
+		F1DD6DF3AE7ACE668BDD3AEE /* ExtractionLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6679A0EAE43AD546CCA7C4EE /* ExtractionLogger.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -38,8 +40,10 @@
 		050852061A287A26D1564790 /* PolluxTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolluxTests.swift; sourceTree = "<group>"; };
 		119F4ED4D5EED5C04EFE1F95 /* PolluxAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolluxAppModel.swift; sourceTree = "<group>"; };
 		12D981465B752B8448E0DECF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		34B081E6597C0E8CAEF26C74 /* ExtractionLogWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtractionLogWindowView.swift; sourceTree = "<group>"; };
 		4B7CD110198385718C925B5F /* FFprobeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FFprobeService.swift; sourceTree = "<group>"; };
 		63C53E2715FC9D52E9BF14B4 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
+		6679A0EAE43AD546CCA7C4EE /* ExtractionLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtractionLogger.swift; sourceTree = "<group>"; };
 		6DE8B910F999C456FB54C747 /* StreamInfoWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamInfoWindowView.swift; sourceTree = "<group>"; };
 		6E9123BDEDE3CC75926D4C0B /* StreamProxyServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamProxyServer.swift; sourceTree = "<group>"; };
 		6F9DCE7059DDE7EEA0CDF901 /* PlayerWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerWindowView.swift; sourceTree = "<group>"; };
@@ -86,6 +90,8 @@
 			children = (
 				CFF11F262B703FDD428E65B2 /* AVPlayerViewContainer.swift */,
 				C3061F5FC78AA16A480FEDBC /* BrowserStreamExtractor.swift */,
+				6679A0EAE43AD546CCA7C4EE /* ExtractionLogger.swift */,
+				34B081E6597C0E8CAEF26C74 /* ExtractionLogWindowView.swift */,
 				4B7CD110198385718C925B5F /* FFprobeService.swift */,
 				63C53E2715FC9D52E9BF14B4 /* MainWindowView.swift */,
 				D1CB44B02D64E9B46786BE2F /* PermissionsRequiredView.swift */,
@@ -184,6 +190,8 @@
 			files = (
 				BB25FFA94D693842CA9B79C1 /* AVPlayerViewContainer.swift in Sources */,
 				578F3842CC1D3D4A059EA4DF /* BrowserStreamExtractor.swift in Sources */,
+				05E6C649CBB042F1F0ED2729 /* ExtractionLogWindowView.swift in Sources */,
+				F1DD6DF3AE7ACE668BDD3AEE /* ExtractionLogger.swift in Sources */,
 				64C021061D87A8B3CC445542 /* FFprobeService.swift in Sources */,
 				C7CD6CBABDEFE48E434B6ACD /* MainWindowView.swift in Sources */,
 				51A34130206DBBBC802F2773 /* PermissionSupport.swift in Sources */,

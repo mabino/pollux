@@ -31,6 +31,12 @@ struct PolluxApp: App {
                 .environmentObject(model)
         }
         .defaultSize(width: 550, height: 260)
+
+        Window("Extraction Log", id: PolluxAppModel.logWindowID) {
+            ExtractionLogWindowView()
+                .environmentObject(model)
+        }
+        .defaultSize(width: 700, height: 450)
     }
 }
 
@@ -43,6 +49,13 @@ struct PolluxCommands: Commands {
                 openWindow(id: PolluxAppModel.infoWindowID)
             }
             .keyboardShortcut("i", modifiers: [.command])
+        }
+
+        CommandGroup(after: .windowArrangement) {
+            Button("Extraction Log") {
+                openWindow(id: PolluxAppModel.logWindowID)
+            }
+            .keyboardShortcut("l", modifiers: [.command, .option])
         }
     }
 }
