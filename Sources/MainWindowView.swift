@@ -18,13 +18,42 @@ struct MainWindowView: View {
                             .textFieldStyle(.roundedBorder)
                             .font(.body.monospaced())
                             .onSubmit(startPlayback)
+                            .disabled(model.isExtracting)
+
+                        if model.isExtracting {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ProgressView(value: model.extractionProgress)
+                                    .progressViewStyle(.linear)
+
+                                HStack {
+                                    Text(model.extractionPhase.isEmpty ? "Extracting stream…" : model.extractionPhase)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+
+                                    Spacer()
+
+                                    Text("\(Int(model.extractionProgress * 100))%")
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
 
                         HStack(spacing: 12) {
-                            Button(action: startPlayback) {
-                                Label(model.isExtracting ? "Extracting…" : "Play Stream", systemImage: model.isExtracting ? "hourglass" : "play.fill")
+                            if model.isExtracting {
+                                Button(role: .destructive) {
+                                    model.cancelExtraction()
+                                } label: {
+                                    Label("Stop Extracting", systemImage: "stop.fill")
+                                }
+                            } else {
+                                Button(action: startPlayback) {
+                                    Label("Play Stream", systemImage: "play.fill")
+                                }
+                                .keyboardShortcut(.defaultAction)
+                                .disabled(model.player != nil || model.pageURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             }
-                            .keyboardShortcut(.defaultAction)
-                            .disabled(model.isExtracting || model.player != nil || model.pageURLString.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                             if model.player != nil {
                                 Button("Open Player Window") {

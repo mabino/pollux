@@ -4,7 +4,11 @@ import Foundation
 final class BrowserStreamExtractor: @unchecked Sendable {
     private let settings = ExtractionSettings()
 
-    func extractPlayableStream(from sourcePageURL: URL) async throws -> ExtractedStream {
+    func extractPlayableStream(
+        from sourcePageURL: URL,
+        onProgress: (@Sendable (String, Double) -> Void)? = nil
+    ) async throws -> ExtractedStream {
+        onProgress?("Launching browser...", 0.10)
         Task { @MainActor in
             ExtractionLogger.shared.clear()
             ExtractionLogger.shared.append("Starting stream extraction for \(sourcePageURL.absoluteString)")
@@ -34,6 +38,8 @@ final class BrowserStreamExtractor: @unchecked Sendable {
 
         do {
             return try await withTimeout(seconds: settings.extractionTimeout) { [self] in
+                try Task.checkCancellation()
+                onProgress?("Navigating to target page...", 0.25)
                 do {
                     Task { @MainActor in
                         ExtractionLogger.shared.append("Navigating browser to \(sourcePageURL.absoluteString)...")
@@ -48,7 +54,12 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     }
                 }
 
+                try Task.checkCancellation()
+                onProgress?("Inspecting player & searching streams...", 0.45)
                 try await self.runActionPipeline(session: session, collector: collector, profile: profile)
+
+                try Task.checkCancellation()
+                onProgress?("Capturing network media requests...", 0.70)
                 let entries = await collector.waitForEntries(
                     graceAfterActions: self.settings.graceAfterActions,
                     collectionWindow: self.settings.collectionWindow
@@ -60,6 +71,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     throw PolluxError.noStreamCaptured(sourcePageURL)
                 }
 
+                try Task.checkCancellation()
                 Task { @MainActor in
                     ExtractionLogger.shared.append("Captured \(entries.count) media candidate request(s). Fetching cookies and playlists...")
                 }
@@ -80,12 +92,16 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     throw PolluxError.noStreamCaptured(sourcePageURL)
                 }
 
+                try Task.checkCancellation()
+                onProgress?("Validating candidate with ffprobe...", 0.85)
                 Task { @MainActor in
                     ExtractionLogger.shared.append("Validating candidates with ffprobe...")
                 }
 
                 let selection = try await self.selectBestCandidate(from: candidates, cachedPlaylists: cachedPlaylists)
 
+                try Task.checkCancellation()
+                onProgress?("Preparing playback...", 0.95)
                 Task { @MainActor in
                     ExtractionLogger.shared.append("SUCCESS: Selected stream (\(selection.kind)) at \(selection.candidate.url.absoluteString)")
                 }
@@ -100,6 +116,12 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     session: session
                 )
             }
+        } catch is CancellationError {
+            await session.close()
+            Task { @MainActor in
+                ExtractionLogger.shared.append("Stream extraction was cancelled.")
+            }
+            throw CancellationError()
         } catch is TimeoutError {
             await session.close()
             Task { @MainActor in
@@ -940,13 +962,22 @@ final class ChromeBrowserSession: @unchecked Sendable {
 
     func waitForDocumentReady(timeout: TimeInterval) async throws {
         let deadline = Date().addingTimeInterval(timeout)
+        let checkScript = """
+        (() => {
+          if (document.readyState === 'interactive' || document.readyState === 'complete') return true;
+          if (document.body && (document.querySelector('iframe') || document.querySelector('video') || document.body.children.length > 0)) return true;
+          return false;
+        })()
+        """
         while Date() < deadline {
             try Task.checkCancellation()
-            if let readyState = try await evaluateString("document.readyState"),
-               readyState == "interactive" || readyState == "complete" {
+            if let isReady = try? await evaluateBool(checkScript), isReady {
                 return
             }
             try await Task.sleep(nanoseconds: 200_000_000)
+        }
+        if let currentURL {
+            throw PolluxError.navigationTimedOut(currentURL)
         }
         throw PolluxError.browserDidNotExposeDevTools
     }

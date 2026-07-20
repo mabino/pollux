@@ -10,6 +10,8 @@ final class PolluxAppModel: ObservableObject {
 
     @Published var pageURLString: String
     @Published var isExtracting = false
+    @Published var extractionProgress: Double = 0.0
+    @Published var extractionPhase: String = ""
     @Published var lastError: UserFacingError?
     @Published var player: AVPlayer?
     @Published var sourcePageURL: URL?
@@ -25,6 +27,7 @@ final class PolluxAppModel: ObservableObject {
     private var proxyServer: StreamProxyServer?
     private var itemObservation: NSKeyValueObservation?
     private var didRunStartupPermissionCheck = false
+    private var activeExtractionTask: Task<Bool, Never>?
 
     init(extractor: BrowserStreamExtractor = BrowserStreamExtractor()) {
         self.extractor = extractor
@@ -34,7 +37,29 @@ final class PolluxAppModel: ObservableObject {
         self.permissionIssue = nil
     }
 
+    func cancelExtraction() {
+        activeExtractionTask?.cancel()
+        activeExtractionTask = nil
+        isExtracting = false
+        extractionProgress = 0.0
+        extractionPhase = ""
+        Task { @MainActor in
+            ExtractionLogger.shared.append("Extraction cancelled by user.")
+        }
+    }
+
     func playCurrentURL() async -> Bool {
+        cancelExtraction()
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return false }
+            return await self.performExtraction()
+        }
+        activeExtractionTask = task
+        return await task.value
+    }
+
+    private func performExtraction() async -> Bool {
         await runStartupPermissionCheckIfNeeded()
         await updateBrowserLaunchPermissionState(triggeredByUser: false, showSuccessMessage: false)
         if permissionIssue != nil {
@@ -57,10 +82,40 @@ final class PolluxAppModel: ObservableObject {
         }
 
         isExtracting = true
-        defer { isExtracting = false }
+        extractionProgress = 0.05
+        extractionPhase = "Launching browser..."
+        defer {
+            isExtracting = false
+            extractionProgress = 0.0
+            extractionPhase = ""
+        }
+
+        let progressTimer = Task { @MainActor [weak self] in
+            let startTime = Date()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard let self, self.isExtracting else { break }
+                let elapsed = Date().timeIntervalSince(startTime)
+                let simulated = min(0.92, 0.05 + (elapsed / 45.0) * 0.87)
+                if simulated > self.extractionProgress {
+                    self.extractionProgress = simulated
+                }
+            }
+        }
+        defer { progressTimer.cancel() }
 
         do {
-            let extracted = try await extractor.extractPlayableStream(from: pageURL)
+            let extracted = try await extractor.extractPlayableStream(from: pageURL) { [weak self] phase, progress in
+                Task { @MainActor in
+                    self?.extractionPhase = phase
+                    if progress > (self?.extractionProgress ?? 0) {
+                        self?.extractionProgress = progress
+                    }
+                }
+            }
+            try Task.checkCancellation()
+            extractionProgress = 1.0
+            extractionPhase = "Starting playback..."
             try await installPlayback(for: extracted)
             return true
         } catch is CancellationError {
