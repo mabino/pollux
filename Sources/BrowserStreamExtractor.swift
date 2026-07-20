@@ -69,32 +69,40 @@ final class BrowserStreamExtractor: @unchecked Sendable {
         collector: CaptureCollector,
         profile: BrowserProfile
     ) async throws {
-        if await collector.hasHits() {
-            return
-        }
+        let deadline = Date().addingTimeInterval(settings.browserTimeout)
 
-        try? await session.click(x: profile.centerX, y: profile.centerY)
-        if await collector.hasHits() {
-            return
-        }
+        while Date() < deadline {
+            if await collector.hasHits() {
+                return
+            }
 
-        try? await session.navigateIntoLargestIframes(
-            timeout: settings.navigateIframeTimeout,
-            maxDepth: settings.navigateIframeMaxDepth
-        )
-        if await collector.hasHits() {
-            return
-        }
+            if let iframeSource = await session.pollForIframeSource(timeout: 2.0),
+               let iframeURL = URL(string: iframeSource) {
+                print("[CDP Pipeline] Found iframe: \(iframeURL.absoluteString)")
+                try? await session.navigate(to: iframeURL, referrer: session.currentURL?.absoluteString, timeout: 3)
+            }
 
-        try? await session.bypassTurnstile(
-            solveTimeout: settings.turnstileSolveTimeout,
-            retryTimeout: settings.turnstileRetryTimeout
-        )
-        if await collector.hasHits() {
-            return
-        }
+            if await collector.hasHits() {
+                return
+            }
 
-        try? await session.click(x: profile.centerX, y: profile.centerY)
+            await session.clickPlayButtons()
+
+            if await collector.hasHits() {
+                return
+            }
+
+            try? await session.bypassTurnstile(
+                solveTimeout: settings.turnstileSolveTimeout,
+                retryTimeout: settings.turnstileRetryTimeout
+            )
+
+            if await collector.hasHits() {
+                return
+            }
+
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
     }
 
     private func cachePlaylists(from entries: [CapturedEntry], session: ChromeBrowserSession) async -> [String: String] {
@@ -590,11 +598,17 @@ final class ChromeBrowserSession: @unchecked Sendable {
       const iframes = document.querySelectorAll('iframe');
       let best = null, maxArea = 0;
       for (const f of iframes) {
+        const src = f.src || f.getAttribute('data-src') || f.getAttribute('data-url') || '';
+        if (!src || src.startsWith('about:') || src.startsWith('javascript:')) continue;
         const r = f.getBoundingClientRect();
         const a = r.width * r.height;
-        if (a > maxArea && r.width > 100 && r.height > 100) { maxArea = a; best = f; }
+        if (a > maxArea && r.width > 50 && r.height > 50) { maxArea = a; best = src; }
       }
-      if (best && best.src && !best.src.startsWith('about:')) return best.src;
+      if (best) return best;
+      for (const f of iframes) {
+        const src = f.src || f.getAttribute('data-src') || f.getAttribute('data-url') || '';
+        if (src && (src.startsWith('http://') || src.startsWith('https://'))) return src;
+      }
       return null;
     })()
     """
@@ -619,6 +633,7 @@ final class ChromeBrowserSession: @unchecked Sendable {
     private let userDataDirectory: URL
     private let connection: CDPConnection
     private var closed = false
+    private(set) var currentURL: URL?
 
     private init(id: UUID, process: Process, userDataDirectory: URL, connection: CDPConnection) {
         self.id = id
@@ -708,8 +723,13 @@ final class ChromeBrowserSession: @unchecked Sendable {
         }
     }
 
-    func navigate(to url: URL, timeout: TimeInterval) async throws {
-        _ = try await connection.call("Page.navigate", params: ["url": url.absoluteString])
+    func navigate(to url: URL, referrer: String? = nil, timeout: TimeInterval) async throws {
+        var params: [String: Any] = ["url": url.absoluteString]
+        if let referrer {
+            params["referrer"] = referrer
+        }
+        currentURL = url
+        _ = try await connection.call("Page.navigate", params: params)
         do {
             try await waitForDocumentReady(timeout: timeout)
         } catch {
@@ -739,6 +759,35 @@ final class ChromeBrowserSession: @unchecked Sendable {
         ])
     }
 
+    func pollForIframeSource(timeout: TimeInterval) async -> String? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let src = try? await evaluateString(ChromeBrowserSession.largestIframeScript),
+               !src.isEmpty {
+                return src
+            }
+            try? await Task.sleep(nanoseconds: 200_000_000)
+        }
+        return nil
+    }
+
+    func clickPlayButtons() async {
+        let script = """
+        (() => {
+          const selectors = ['button', '.play-btn', '.vjs-big-play-button', '#player', '[class*="play"]', '[id*="play"]', 'a.btn'];
+          for (const s of selectors) {
+            const el = document.querySelector(s);
+            if (el && typeof el.click === 'function') {
+              el.click();
+              return true;
+            }
+          }
+          return false;
+        })()
+        """
+        _ = try? await evaluateBool(script)
+    }
+
     func navigateIntoLargestIframes(timeout: TimeInterval, maxDepth: Int) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         for _ in 0..<maxDepth {
@@ -746,7 +795,8 @@ final class ChromeBrowserSession: @unchecked Sendable {
             guard Date() < deadline else {
                 return
             }
-            guard let iframeSource = try await evaluateString(ChromeBrowserSession.largestIframeScript),
+            let remaining = max(deadline.timeIntervalSinceNow, 0.5)
+            guard let iframeSource = await pollForIframeSource(timeout: remaining),
                   let iframeURL = URL(string: iframeSource)
             else {
                 return
@@ -828,7 +878,7 @@ final class ChromeBrowserSession: @unchecked Sendable {
         ])
     }
 
-    private func waitForDocumentReady(timeout: TimeInterval) async throws {
+    func waitForDocumentReady(timeout: TimeInterval) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             try Task.checkCancellation()
@@ -869,7 +919,7 @@ final class ChromeBrowserSession: @unchecked Sendable {
         return (try? await evaluateBool(ChromeBrowserSession.turnstileGoneScript)) ?? false
     }
 
-    private func evaluateString(_ script: String) async throws -> String? {
+    func evaluateString(_ script: String) async throws -> String? {
         let value = try await evaluate(script)
         return try cast(value, to: String.self)
     }
@@ -958,6 +1008,7 @@ private actor CaptureCollector {
                 requestHeadersByID[requestID] = headers
             }
             if let url {
+                print("[CDP Request] \(url)")
                 add(url: url, headers: headers, mimeType: nil, requirePatternMatch: true)
             }
 
