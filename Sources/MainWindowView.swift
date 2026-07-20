@@ -72,7 +72,7 @@ struct MainWindowView: View {
                     }
                 }
                 .padding(18)
-                .frame(minWidth: 500, minHeight: 120)
+                .frame(minWidth: 500, minHeight: 155)
             }
         }
         .onAppear {

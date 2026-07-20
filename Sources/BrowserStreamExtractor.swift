@@ -811,11 +811,13 @@ final class ChromeBrowserSession: @unchecked Sendable {
             params["referrer"] = referrer
         }
         currentURL = url
-        _ = try await connection.call("Page.navigate", params: params)
+        _ = try? await connection.call("Page.navigate", params: params, timeout: 10.0)
         do {
-            try await waitForDocumentReady(timeout: timeout)
+            try await waitForDocumentReady(timeout: min(timeout, 8.0))
         } catch {
-            throw PolluxError.navigationTimedOut(url)
+            Task { @MainActor in
+                ExtractionLogger.shared.append("Page ready state check notice: continuing pipeline to inspect player & network candidates.")
+            }
         }
     }
 
@@ -1276,7 +1278,7 @@ private actor CDPConnection {
         self.eventHandler = eventHandler
     }
 
-    func call(_ method: String, params: [String: Any]) async throws -> Data {
+    func call(_ method: String, params: [String: Any], timeout: TimeInterval = 10.0) async throws -> Data {
         guard !isClosed else {
             throw PolluxError.browserDidNotExposeDevTools
         }
@@ -1292,15 +1294,31 @@ private actor CDPConnection {
         let encoded = try JSONSerialization.data(withJSONObject: payload)
         let message = String(decoding: encoded, as: UTF8.self)
 
-        return try await withCheckedThrowingContinuation { continuation in
-            pendingCalls[identifier] = continuation
-            Task {
-                do {
-                    try await webSocket.send(.string(message))
-                } catch {
-                    failPendingCall(id: identifier, error: error)
+        return try await withThrowingTaskGroup(of: Data.self) { group in
+            group.addTask {
+                try await withCheckedThrowingContinuation { continuation in
+                    Task {
+                        await self.storePendingCall(id: identifier, continuation: continuation)
+                        do {
+                            try await self.webSocket.send(.string(message))
+                        } catch {
+                            await self.failPendingCall(id: identifier, error: error)
+                        }
+                    }
                 }
             }
+
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                await self.failPendingCall(id: identifier, error: TimeoutError())
+                throw TimeoutError()
+            }
+
+            guard let result = try await group.next() else {
+                throw PolluxError.unexpected("CDP call \(method) returned no data.")
+            }
+            group.cancelAll()
+            return result
         }
     }
 
@@ -1340,6 +1358,10 @@ private actor CDPConnection {
                 return
             }
         }
+    }
+
+    private func storePendingCall(id: Int, continuation: CheckedContinuation<Data, Error>) {
+        pendingCalls[id] = continuation
     }
 
     private func handleMessage(_ data: Data) async throws {

@@ -10,7 +10,7 @@ struct PolluxApp: App {
                 .environmentObject(model)
         }
         .windowResizability(.contentSize)
-        .defaultSize(width: 540, height: 160)
+        .defaultSize(width: 540, height: 195)
         .commands {
             PolluxCommands()
         }
