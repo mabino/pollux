@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 final class BrowserStreamExtractor: @unchecked Sendable {
@@ -517,7 +518,73 @@ private enum ProbeEvaluation {
     case failure(StreamCandidate, String)
 }
 
+final class ChromiumProcessTracker: @unchecked Sendable {
+    static let shared = ChromiumProcessTracker()
+
+    private struct TrackedSession {
+        let process: Process
+        let userDataDirectory: URL
+    }
+
+    private var sessions: [UUID: TrackedSession] = [:]
+    private let lock = NSLock()
+
+    private init() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppWillTerminate),
+            name: NSApplication.willTerminateNotification,
+            object: nil
+        )
+    }
+
+    func register(id: UUID, process: Process, userDataDirectory: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        sessions[id] = TrackedSession(process: process, userDataDirectory: userDataDirectory)
+    }
+
+    func unregister(id: UUID) {
+        lock.lock()
+        defer { lock.unlock() }
+        sessions.removeValue(forKey: id)
+    }
+
+    func terminateSession(id: UUID) {
+        lock.lock()
+        let tracked = sessions.removeValue(forKey: id)
+        lock.unlock()
+
+        if let tracked {
+            if tracked.process.isRunning {
+                tracked.process.terminate()
+                tracked.process.waitUntilExit()
+            }
+            try? FileManager.default.removeItem(at: tracked.userDataDirectory)
+        }
+    }
+
+    @objc private func handleAppWillTerminate() {
+        terminateAll()
+    }
+
+    func terminateAll() {
+        lock.lock()
+        let allSessions = Array(sessions.values)
+        sessions.removeAll()
+        lock.unlock()
+
+        for tracked in allSessions {
+            if tracked.process.isRunning {
+                tracked.process.terminate()
+            }
+            try? FileManager.default.removeItem(at: tracked.userDataDirectory)
+        }
+    }
+}
+
 final class ChromeBrowserSession: @unchecked Sendable {
+    let id: UUID
     private static let largestIframeScript = """
     (function() {
       const iframes = document.querySelectorAll('iframe');
@@ -553,7 +620,8 @@ final class ChromeBrowserSession: @unchecked Sendable {
     private let connection: CDPConnection
     private var closed = false
 
-    private init(process: Process, userDataDirectory: URL, connection: CDPConnection) {
+    private init(id: UUID, process: Process, userDataDirectory: URL, connection: CDPConnection) {
+        self.id = id
         self.process = process
         self.userDataDirectory = userDataDirectory
         self.connection = connection
@@ -567,8 +635,9 @@ final class ChromeBrowserSession: @unchecked Sendable {
             throw PolluxError.chromiumMissing
         }
 
+        let id = UUID()
         let userDataDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pollux-chrome-\(UUID().uuidString)")
+            .appendingPathComponent("pollux-chrome-\(id.uuidString)")
         try FileManager.default.createDirectory(at: userDataDirectory, withIntermediateDirectories: true)
 
         let process = Process()
@@ -603,6 +672,8 @@ final class ChromeBrowserSession: @unchecked Sendable {
 
         do {
             try process.run()
+            ChromiumProcessTracker.shared.register(id: id, process: process, userDataDirectory: userDataDirectory)
+
             let port = try await waitForDebugPort(
                 process: process,
                 diagnostics: diagnostics,
@@ -619,6 +690,7 @@ final class ChromeBrowserSession: @unchecked Sendable {
             await connection.setEventHandler(eventHandler)
 
             let session = ChromeBrowserSession(
+                id: id,
                 process: process,
                 userDataDirectory: userDataDirectory,
                 connection: connection
@@ -627,12 +699,8 @@ final class ChromeBrowserSession: @unchecked Sendable {
             diagnostics.stop()
             return session
         } catch {
-            if process.isRunning {
-                process.terminate()
-                process.waitUntilExit()
-            }
             diagnostics.stop()
-            try? FileManager.default.removeItem(at: userDataDirectory)
+            ChromiumProcessTracker.shared.terminateSession(id: id)
             if let polluxError = error as? PolluxError {
                 throw polluxError
             }
@@ -743,12 +811,7 @@ final class ChromeBrowserSession: @unchecked Sendable {
         closed = true
 
         await connection.close()
-
-        if process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
-        }
-        try? FileManager.default.removeItem(at: userDataDirectory)
+        ChromiumProcessTracker.shared.terminateSession(id: id)
     }
 
     private func configure(profile: BrowserProfile) async throws {

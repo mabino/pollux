@@ -8,50 +8,20 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                Text("Pollux uses ffprobe to verify extracted streams before handing them to AVPlayer. If ffprobe is not available on your PATH, save its executable location here.")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Section("ffprobe") {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Current Resolution")
+            Section("Dependencies") {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("ffprobe Binary")
                         .font(.headline)
 
-                    if let activeFFprobeURL {
-                        Text(activeFFprobeURL.path)
-                            .font(.callout.monospaced())
-                            .textSelection(.enabled)
+                    HStack(spacing: 8) {
+                        TextField(effectiveFFprobePlaceholder, text: $ffprobePath)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.body.monospaced())
 
-                        Text(activeResolutionMessage)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Pollux could not find ffprobe automatically.")
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(.red)
-
-                        Text("Choose the ffprobe executable below, then retry playback.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.vertical, 4)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Saved Override")
-                        .font(.headline)
-
-                    TextField("/opt/homebrew/bin/ffprobe", text: $ffprobePath)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.body.monospaced())
-
-                    HStack {
                         Button("Choose…", action: chooseFFprobe)
 
-                        if hasSavedOverride {
-                            Button("Use Automatic Discovery") {
+                        if !ffprobePath.isEmpty {
+                            Button("Clear") {
                                 ffprobePath = ""
                                 selectionError = nil
                             }
@@ -62,21 +32,42 @@ struct SettingsView: View {
                         Text(selectionError)
                             .font(.callout)
                             .foregroundStyle(.red)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else if hasSavedOverride {
-                        if let savedOverrideURL {
-                            Text("Saved path resolves to \(savedOverrideURL.path).")
+                    } else {
+                        HStack(spacing: 6) {
+                            if activeFFprobeURL != nil {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                            } else {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.red)
+                            }
+                            Text(ffprobeStatusMessage)
                                 .font(.callout)
                                 .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Chromium / Google Chrome")
+                        .font(.headline)
+
+                    HStack(spacing: 6) {
+                        if let chromiumURL = detectedChromiumURL {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("Found at \(chromiumURL.path)")
+                                .font(.callout.monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
                         } else {
-                            Text("The saved path does not currently point to an executable file.")
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                            Text("Chromium / Google Chrome was not found in standard locations or via POLLUX_CHROME_PATH.")
                                 .font(.callout)
                                 .foregroundStyle(.red)
                         }
-                    } else {
-                        Text("Leave this empty to let Pollux use ffprobe from your environment or PATH.")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
                     }
                 }
                 .padding(.vertical, 4)
@@ -84,7 +75,7 @@ struct SettingsView: View {
 
             Section("Permissions") {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("App Management")
+                    Text("App Management Access")
                         .font(.headline)
 
                     if let permissionIssue = model.permissionIssue {
@@ -97,26 +88,18 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     } else {
-                        Text("Pollux currently has the startup permission it checks for protected playback sites.")
+                        Text("Pollux currently has the App Management permission required for launching Chromium.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
 
-                    HStack {
+                    HStack(spacing: 10) {
                         Button(model.isCheckingPermissions ? "Checking…" : "Request Access") {
                             Task {
                                 await model.requestAccess(for: .appManagement)
                             }
                         }
                         .disabled(model.isCheckingPermissions)
-
-                        Button("Open Privacy & Security") {
-                            if let permissionIssue = model.permissionIssue {
-                                model.openSystemSettings(for: permissionIssue)
-                            } else {
-                                _ = NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security")!)
-                            }
-                        }
 
                         Button(model.isResettingPermissions ? "Resetting…" : "Reset Permissions") {
                             Task {
@@ -133,8 +116,8 @@ struct SettingsView: View {
                         .disabled(model.isCheckingPermissions)
                     }
 
-                    Text("Reset Permissions runs tccutil reset AppManagement for Pollux. After resetting, press Request Access so macOS can prompt again, then quit and reopen Pollux once Chromium can launch.")
-                        .font(.callout)
+                    Text("Reset Permissions runs `tccutil reset AppManagement`. Press Request Access afterwards so macOS can prompt again.")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
 
                     if let permissionActionMessage = model.permissionActionMessage {
@@ -149,15 +132,11 @@ struct SettingsView: View {
             selectionError = nil
         }
         .padding(20)
-        .frame(minWidth: 560, minHeight: 300)
+        .frame(minWidth: 560, minHeight: 320)
     }
 
     private var trimmedFFprobePath: String {
         ffprobePath.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var hasSavedOverride: Bool {
-        !trimmedFFprobePath.isEmpty
     }
 
     private var savedOverrideURL: URL? {
@@ -179,17 +158,32 @@ struct SettingsView: View {
         )
     }
 
-    private var activeResolutionMessage: String {
+    private var detectedChromiumURL: URL? {
+        locateChromiumExecutable()
+    }
+
+    private var effectiveFFprobePlaceholder: String {
+        if let autoPath = autoDetectedFFprobeURL?.path {
+            return autoPath
+        }
+        return "/opt/homebrew/bin/ffprobe"
+    }
+
+    private var ffprobeStatusMessage: String {
         if ProcessInfo.processInfo.environment["POLLUX_FFPROBE_PATH"]?.isEmpty == false {
-            return "Using the POLLUX_FFPROBE_PATH environment override."
+            return "Using POLLUX_FFPROBE_PATH environment variable."
         }
-        if hasSavedOverride {
-            return "Using the saved Settings override."
+        if !trimmedFFprobePath.isEmpty {
+            if let savedOverrideURL {
+                return "Using custom path: \(savedOverrideURL.path)"
+            } else {
+                return "Saved path does not point to a valid executable."
+            }
         }
-        if autoDetectedFFprobeURL != nil {
-            return "Found automatically from your PATH."
+        if let autoDetectedFFprobeURL {
+            return "Auto-detected at \(autoDetectedFFprobeURL.path)"
         }
-        return "Pollux will use this path the next time you start playback."
+        return "ffprobe not found. Please specify the executable path above."
     }
 
     private func chooseFFprobe() {
@@ -201,7 +195,7 @@ struct SettingsView: View {
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.resolvesAliases = true
-        if let currentURL = savedOverrideURL {
+        if let currentURL = savedOverrideURL ?? activeFFprobeURL {
             panel.directoryURL = currentURL.deletingLastPathComponent()
         }
 
@@ -210,7 +204,7 @@ struct SettingsView: View {
         }
 
         guard let resolvedURL = resolveExecutablePath(selectedURL.path) else {
-            selectionError = "Choose the ffprobe executable itself, not a folder or a non-executable file."
+            selectionError = "Choose the ffprobe executable itself, not a folder or non-executable file."
             return
         }
 

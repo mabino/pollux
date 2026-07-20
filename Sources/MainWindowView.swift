@@ -9,17 +9,8 @@ struct MainWindowView: View {
             if let permissionIssue = model.permissionIssue {
                 PermissionsRequiredView(issue: permissionIssue)
             } else {
-                VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Pollux")
-                            .font(.largeTitle.bold())
-
-                        Text("Paste a player page URL. Pollux follows Castor's Chromium + network-capture approach, validates candidates with ffprobe, and opens the extracted stream in a native macOS player window.")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text("Player Page URL")
                             .font(.headline)
 
@@ -49,21 +40,21 @@ struct MainWindowView: View {
 
                     if let sourcePageURL = model.sourcePageURL, let extractedStreamURL = model.extractedStreamURL {
                         GroupBox("Current Session") {
-                            VStack(alignment: .leading, spacing: 10) {
-                                VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text("Source Page")
-                                        .font(.subheadline.weight(.semibold))
+                                        .font(.caption.weight(.semibold))
                                     Text(sourcePageURL.absoluteString)
-                                        .font(.callout.monospaced())
+                                        .font(.caption.monospaced())
                                         .foregroundStyle(.secondary)
                                         .textSelection(.enabled)
                                 }
 
-                                VStack(alignment: .leading, spacing: 4) {
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text("Extracted Stream")
-                                        .font(.subheadline.weight(.semibold))
+                                        .font(.caption.weight(.semibold))
                                     Text(extractedStreamURL.absoluteString)
-                                        .font(.callout.monospaced())
+                                        .font(.caption.monospaced())
                                         .foregroundStyle(.secondary)
                                         .textSelection(.enabled)
                                 }
@@ -71,25 +62,14 @@ struct MainWindowView: View {
                                 Button("Open Player Window") {
                                     openWindow(id: PolluxAppModel.playerWindowID)
                                 }
+                                .font(.footnote)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-
-                    Spacer(minLength: 0)
-
-                    GroupBox("Runtime Requirements") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Pollux needs Chromium or Google Chrome for extraction and ffprobe for stream validation.")
-                            Text("Choose Pollux > Settings… to save a custom ffprobe path, or use POLLUX_CHROME_PATH and POLLUX_FFPROBE_PATH for environment-based overrides.")
-                        }
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
                 }
-                .padding(24)
-                .frame(minWidth: 680, minHeight: 460)
+                .padding(18)
+                .frame(minWidth: 500, minHeight: 140)
             }
         }
         .onAppear {

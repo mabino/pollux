@@ -9,6 +9,8 @@ struct PolluxApp: App {
             MainWindowView()
                 .environmentObject(model)
         }
+        .windowResizability(.contentSize)
+        .defaultSize(width: 540, height: 160)
 
         Settings {
             SettingsView()
