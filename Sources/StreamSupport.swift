@@ -171,7 +171,7 @@ enum StreamKind: String, Sendable {
 
     static func fromMIME(_ mimeType: String) -> StreamKind? {
         switch mimeType.lowercased() {
-        case "audio/mpegurl", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl":
+        case "audio/mpegurl", "audio/x-mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "video/mp2t", "video/ts":
             return .hls
         case "video/mp4", "application/mp4":
             return .mp4

@@ -1280,6 +1280,9 @@ private actor CaptureCollector {
             mimeType: normalizedMimeType,
             score: rankURL(url)
         )
+        Task { @MainActor in
+            ExtractionLogger.shared.append("CAPTURED MEDIA CANDIDATE: \(url)")
+        }
     }
 
     private func matchesPattern(_ url: String) -> Bool {
