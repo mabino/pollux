@@ -1155,9 +1155,8 @@ final class ChromeBrowserSession: @unchecked Sendable {
     private func evaluate(_ script: String) async throws -> Any? {
         let payload = try await connection.call("Runtime.evaluate", params: [
             "expression": script,
-            "awaitPromise": true,
             "returnByValue": true,
-        ], timeout: 2.0)
+        ], timeout: 8.0)
         let result = try jsonDictionary(from: payload)
 
         if let exception = result["exceptionDetails"] as? [String: Any],
