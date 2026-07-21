@@ -173,16 +173,31 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                 return
             }
 
-            let domSummaryScript = """
-            (() => {
-              const iframes = Array.from(document.querySelectorAll('iframe')).map(i => i.src || i.getAttribute('data-src') || 'no-src');
-              const videos = document.querySelectorAll('video').length;
-              return 'readyState=' + document.readyState + ', iframes=' + iframes.length + ' [' + iframes.slice(0, 3).join(', ') + '], videos=' + videos;
-            })()
-            """
-            if let summary = try? await session.evaluateString(domSummaryScript) {
+            // Probe page state
+            do {
+                let domSummaryScript = """
+                (() => {
+                  const iframes = Array.from(document.querySelectorAll('iframe')).map(i => i.src || i.getAttribute('data-src') || 'no-src');
+                  const videos = document.querySelectorAll('video').length;
+                  const title = document.title;
+                  const bodyText = (document.body && document.body.innerText || '').substring(0, 200);
+                  return 'readyState=' + document.readyState + ', title=' + title + ', iframes=' + iframes.length + ' [' + iframes.slice(0, 3).join(', ') + '], videos=' + videos + ', body=' + bodyText;
+                })()
+                """
+                if let summary = try await session.evaluateString(domSummaryScript) {
+                    Task { @MainActor in
+                        ExtractionLogger.shared.append("DOM State: \(summary)")
+                    }
+                }
+            } catch {
                 Task { @MainActor in
-                    ExtractionLogger.shared.append("DOM State: \(summary)")
+                    ExtractionLogger.shared.append("DOM eval error: \(error.localizedDescription)")
+                }
+                // Try a minimal probe to see if CDP is responding at all
+                if let title = try? await session.evaluateString("document.title") {
+                    Task { @MainActor in
+                        ExtractionLogger.shared.append("Page title: \(title)")
+                    }
                 }
             }
 
