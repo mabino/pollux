@@ -193,12 +193,12 @@ final class BrowserStreamExtractor: @unchecked Sendable {
             } catch {
                 jsMainThreadBlocked = true
                 Task { @MainActor in
-                    ExtractionLogger.shared.append("JS main thread blocked (eval timeout). Using CDP DOM snapshot...")
+                    ExtractionLogger.shared.append("JS main thread blocked (eval timeout). Capturing screenshot...")
                 }
-                // Fallback: use CDP DOM domain which bypasses JS main thread
-                if let htmlSnippet = try? await session.getOuterHTMLSnippet(maxLength: 500) {
+                // Fallback: take a screenshot (compositor-level, no JS needed)
+                if let screenshotPath = try? await session.captureScreenshot() {
                     Task { @MainActor in
-                        ExtractionLogger.shared.append("Page HTML: \(htmlSnippet)")
+                        ExtractionLogger.shared.append("Screenshot saved: \(screenshotPath)")
                     }
                 }
             }
@@ -218,25 +218,27 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                 return
             }
 
-            // Step 2: Poll for iframe and navigate into iframe if present
-            if let iframeSource = await session.pollForIframeSource(timeout: 2.0),
-               let iframeURL = URL(string: iframeSource) {
-                if iframeURL != session.currentURL {
-                    Task { @MainActor in
-                        ExtractionLogger.shared.append("Discovered player iframe: \(iframeURL.absoluteString). Navigating browser into iframe...")
+            // Step 2: Poll for iframe and navigate into iframe if present (skip if JS blocked)
+            if !jsMainThreadBlocked {
+                if let iframeSource = await session.pollForIframeSource(timeout: 2.0),
+                   let iframeURL = URL(string: iframeSource) {
+                    if iframeURL != session.currentURL {
+                        Task { @MainActor in
+                            ExtractionLogger.shared.append("Discovered player iframe: \(iframeURL.absoluteString). Navigating browser into iframe...")
+                        }
+                        try? await session.navigate(to: iframeURL, referrer: session.currentURL?.absoluteString, timeout: 5)
                     }
-                    try? await session.navigate(to: iframeURL, referrer: session.currentURL?.absoluteString, timeout: 5)
+                }
+
+                if await collector.hasHits() {
+                    Task { @MainActor in
+                        ExtractionLogger.shared.append("Media candidate captured inside iframe.")
+                    }
+                    return
                 }
             }
 
-            if await collector.hasHits() {
-                Task { @MainActor in
-                    ExtractionLogger.shared.append("Media candidate captured inside iframe.")
-                }
-                return
-            }
-
-            // Step 3: Viewport click
+            // Step 3: Viewport click (works via CDP Input domain, no JS needed)
             Task { @MainActor in
                 ExtractionLogger.shared.append("Clicking player viewport center (x: \(profile.centerX), y: \(profile.centerY))...")
             }
@@ -249,20 +251,22 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                 return
             }
 
-            // Step 4: HTML5 play controls
-            Task { @MainActor in
-                ExtractionLogger.shared.append("Querying and clicking HTML5 play controls...")
-            }
-            await session.clickPlayButtons()
-
-            if await collector.hasHits() {
+            // Step 4: HTML5 play controls (skip if JS blocked, uses evaluate)
+            if !jsMainThreadBlocked {
                 Task { @MainActor in
-                    ExtractionLogger.shared.append("Media candidate captured after clicking play controls.")
+                    ExtractionLogger.shared.append("Querying and clicking HTML5 play controls...")
                 }
-                return
+                await session.clickPlayButtons()
+
+                if await collector.hasHits() {
+                    Task { @MainActor in
+                        ExtractionLogger.shared.append("Media candidate captured after clicking play controls.")
+                    }
+                    return
+                }
             }
 
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
         }
     }
 
@@ -1086,6 +1090,24 @@ final class ChromeBrowserSession: @unchecked Sendable {
             return String(outerHTML.prefix(maxLength)) + "..."
         }
         return outerHTML
+    }
+
+    /// Capture a screenshot using CDP Page.captureScreenshot (compositor-level, no JS needed).
+    func captureScreenshot() async throws -> String {
+        let payload = try await connection.call("Page.captureScreenshot", params: [
+            "format": "png",
+        ], timeout: 5.0)
+        let result = try jsonDictionary(from: payload)
+        guard let base64Data = result["data"] as? String,
+              let imageData = Data(base64Encoded: base64Data) else {
+            throw PolluxError.unexpected("Screenshot capture returned no data")
+        }
+        let screenshotDir = FileManager.default.temporaryDirectory.appendingPathComponent("pollux-screenshots")
+        try FileManager.default.createDirectory(at: screenshotDir, withIntermediateDirectories: true)
+        let filename = "screenshot-\(Int(Date().timeIntervalSince1970)).png"
+        let filePath = screenshotDir.appendingPathComponent(filename)
+        try imageData.write(to: filePath)
+        return filePath.path
     }
 
     private func configure(profile: BrowserProfile) async throws {
