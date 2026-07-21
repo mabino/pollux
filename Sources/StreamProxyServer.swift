@@ -207,7 +207,7 @@ actor StreamProxyServer {
 
         let components = URLComponents(url: request.url, resolvingAgainstBaseURL: false)
         guard let targetValue = components?.queryItems?.first(where: { $0.name == "url" })?.value,
-              let targetURL = URL(string: targetValue)
+              let targetURL = safeURL(from: targetValue)
         else {
             return buildErrorResponse(statusCode: 400, message: "Missing or invalid target URL")
         }
@@ -216,7 +216,12 @@ actor StreamProxyServer {
 
         if isTargetURLPlaylist {
             if let cachedPlaylist = stream.cachedPlaylists[targetURL.absoluteString], shouldServeCachedPlaylist(cachedPlaylist) {
-                let rewritten = try rewritePlaylistData(Data(cachedPlaylist.utf8), playlistURL: targetURL) {
+                let filtered = filterExcludedVariantsFromMasterPlaylist(
+                    Data(cachedPlaylist.utf8),
+                    playlistURL: targetURL,
+                    excludedVariantURLs: stream.excludedVariantURLs
+                )
+                let rewritten = try rewritePlaylistData(filtered, playlistURL: targetURL) {
                     ProxyURLBuilder.proxyURL(port: localPort, targetURL: $0)
                 }
                 let proxyResponse = ProxyResponse(
@@ -235,7 +240,12 @@ actor StreamProxyServer {
                    !fetchedText.isEmpty,
                    !fetchedText.hasPrefix("ERROR:")
                 {
-                    let rewritten = try rewritePlaylistData(Data(fetchedText.utf8), playlistURL: targetURL) {
+                    let filtered = filterExcludedVariantsFromMasterPlaylist(
+                        Data(fetchedText.utf8),
+                        playlistURL: targetURL,
+                        excludedVariantURLs: stream.excludedVariantURLs
+                    )
+                    let rewritten = try rewritePlaylistData(filtered, playlistURL: targetURL) {
                         ProxyURLBuilder.proxyURL(port: localPort, targetURL: $0)
                     }
                     let proxyResponse = ProxyResponse(
@@ -251,7 +261,12 @@ actor StreamProxyServer {
             }
 
             if let cachedPlaylist = stream.cachedPlaylists[targetURL.absoluteString], !cachedPlaylist.isEmpty {
-                let rewritten = try rewritePlaylistData(Data(cachedPlaylist.utf8), playlistURL: targetURL) {
+                let filtered = filterExcludedVariantsFromMasterPlaylist(
+                    Data(cachedPlaylist.utf8),
+                    playlistURL: targetURL,
+                    excludedVariantURLs: stream.excludedVariantURLs
+                )
+                let rewritten = try rewritePlaylistData(filtered, playlistURL: targetURL) {
                     ProxyURLBuilder.proxyURL(port: localPort, targetURL: $0)
                 }
                 let proxyResponse = ProxyResponse(
@@ -295,6 +310,21 @@ actor StreamProxyServer {
                 statusCode: httpResponse.statusCode,
                 headers: headers,
                 body: request.method == "HEAD" ? Data() : rewritten
+            )
+            return proxyResponse.encoded()
+        }
+
+        if let browserSession = stream.session,
+           let browserFetchedBody = try? await browserSession.fetchBinaryResource(at: targetURL, timeout: 6)
+        {
+            let rewrittenBody = stripPNGHeaderIfNeeded(browserFetchedBody)
+            let proxyResponse = ProxyResponse(
+                statusCode: 200,
+                headers: [
+                    "Content-Type": proxyContentType(for: targetURL),
+                    "Content-Length": "\(rewrittenBody.count)",
+                ],
+                body: request.method == "HEAD" ? Data() : rewrittenBody
             )
             return proxyResponse.encoded()
         }

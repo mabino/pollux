@@ -5,10 +5,26 @@ struct ProbeResult: Sendable {
     let bitRate: Int64
     let hasVideo: Bool
     let hasAudio: Bool
+    let hasPotentialVideo: Bool
 
     var playable: Bool {
         hasVideo && hasAudio
     }
+}
+
+func acceptsProbeResult(_ result: ProbeResult, for kind: StreamKind) -> Bool {
+    if result.playable {
+        return true
+    }
+
+    return kind == .hls && result.hasAudio && result.hasPotentialVideo
+}
+
+func probeResultNotice(_ result: ProbeResult, for kind: StreamKind) -> String? {
+    guard !result.playable, kind == .hls, result.hasAudio, result.hasPotentialVideo else {
+        return nil
+    }
+    return "Pollux is using an HLS stream whose audio is confirmed but whose video dimensions were not fully known during probing."
 }
 
 final class FFprobeService: @unchecked Sendable {
@@ -77,9 +93,13 @@ final class FFprobeService: @unchecked Sendable {
 
             var hasVideo = false
             var hasAudio = false
+            var hasPotentialVideo = false
             for stream in decoded.streams {
                 switch stream.codecType {
                 case "video":
+                    if !imageCodecs.contains(stream.codecName?.lowercased() ?? "") {
+                        hasPotentialVideo = true
+                    }
                     let width = stream.width ?? 0
                     let height = stream.height ?? 0
                     if width > 0, height > 0, !imageCodecs.contains(stream.codecName?.lowercased() ?? "") {
@@ -92,7 +112,13 @@ final class FFprobeService: @unchecked Sendable {
                 }
             }
 
-            return ProbeResult(kind: kind, bitRate: bitRate, hasVideo: hasVideo, hasAudio: hasAudio)
+            return ProbeResult(
+                kind: kind,
+                bitRate: bitRate,
+                hasVideo: hasVideo,
+                hasAudio: hasAudio,
+                hasPotentialVideo: hasPotentialVideo
+            )
         }
         return try await task.value
     }

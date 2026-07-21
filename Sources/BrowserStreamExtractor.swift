@@ -126,6 +126,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     headers: selection.candidate.headers,
                     kind: selection.kind,
                     cachedPlaylists: cachedPlaylists,
+                    excludedVariantURLs: selection.excludedVariantURLs,
                     notice: selection.notice,
                     session: session
                 )
@@ -221,7 +222,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
             // Step 2: Poll for iframe and navigate into iframe if present (skip if JS blocked)
             if !jsMainThreadBlocked {
                 if let iframeSource = await session.pollForIframeSource(timeout: 2.0),
-                   let iframeURL = URL(string: iframeSource) {
+                   let iframeURL = safeURL(from: iframeSource) {
                     if iframeURL != session.currentURL {
                         Task { @MainActor in
                             ExtractionLogger.shared.append("Discovered player iframe: \(iframeURL.absoluteString). Navigating browser into iframe...")
@@ -273,7 +274,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
     private func cachePlaylists(from entries: [CapturedEntry], session: ChromeBrowserSession) async -> [String: String] {
         var cachedPlaylists: [String: String] = [:]
         var pendingURLs = entries.compactMap { entry -> URL? in
-            guard let url = URL(string: entry.rawURL),
+            guard let url = safeURL(from: entry.rawURL),
                   StreamKind.detect(url: url, mimeType: entry.mimeType) == .hls
             else {
                 return nil
@@ -330,7 +331,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
 
         for entry in entries {
             guard
-                let url = URL(string: entry.rawURL),
+                let url = safeURL(from: entry.rawURL),
                 let kind = StreamKind.detect(url: url, mimeType: entry.mimeType)
             else {
                 continue
@@ -355,7 +356,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
 
         for cachedPlaylistURL in cachedPlaylists.keys {
             guard
-                let url = URL(string: cachedPlaylistURL),
+                let url = safeURL(from: cachedPlaylistURL),
                 StreamKind.detect(url: url, mimeType: nil) == .hls
             else {
                 continue
@@ -458,9 +459,10 @@ final class BrowserStreamExtractor: @unchecked Sendable {
             return collected
         }
 
-        var playable: [(candidate: StreamCandidate, kind: StreamKind, bitRate: Int64)] = []
+        var playable: [(candidate: StreamCandidate, kind: StreamKind, bitRate: Int64, notice: String?)] = []
         var fallbacks: [StreamCandidate] = []
         var unsupportedKinds = Set<String>()
+        var excludedVariantURLs = Set<String>()
 
         for evaluation in evaluations {
             switch evaluation {
@@ -470,8 +472,10 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     unsupportedKinds.insert(resolvedKind.displayName)
                     continue
                 }
-                if result.playable {
-                    playable.append((candidate, resolvedKind, max(result.bitRate, 1)))
+                if acceptsProbeResult(result, for: resolvedKind) {
+                    playable.append((candidate, resolvedKind, max(result.bitRate, 1), probeResultNotice(result, for: resolvedKind)))
+                } else if resolvedKind == .hls {
+                    excludedVariantURLs.insert(candidate.url.absoluteString)
                 }
 
             case .failure(let candidate, _):
@@ -489,8 +493,8 @@ final class BrowserStreamExtractor: @unchecked Sendable {
         )
         let playablePool = preferredPlayableCandidates.isEmpty
             ? playable
-            : playable.filter { candidate, _, _ in
-                preferredPlayableCandidates.contains { $0.url == candidate.url }
+            : playable.filter { entry in
+                preferredPlayableCandidates.contains { $0.url == entry.candidate.url }
             }
 
         if let bestPlayable = playablePool.max(by: { lhs, rhs in
@@ -499,13 +503,19 @@ final class BrowserStreamExtractor: @unchecked Sendable {
             }
             return lhs.candidate.score < rhs.candidate.score
         }) {
-            return CandidateSelection(candidate: bestPlayable.candidate, kind: bestPlayable.kind, notice: nil)
+            return CandidateSelection(
+                candidate: bestPlayable.candidate,
+                kind: bestPlayable.kind,
+                excludedVariantURLs: excludedVariantURLs,
+                notice: bestPlayable.notice
+            )
         }
 
         if let masterFallback = bestMasterPlaylistCandidate(from: candidates, cachedPlaylists: cachedPlaylists) {
             return CandidateSelection(
                 candidate: masterFallback,
                 kind: .hls,
+                excludedVariantURLs: excludedVariantURLs,
                 notice: "Pollux is using a browser-cached HLS master playlist because ffprobe could not verify the final variant layout."
             )
         }
@@ -519,6 +529,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
             return CandidateSelection(
                 candidate: fallback,
                 kind: fallback.kind,
+                excludedVariantURLs: excludedVariantURLs,
                 notice: "Pollux couldn't verify this stream with ffprobe, so playback is a best-effort attempt."
             )
         }
@@ -558,6 +569,7 @@ private func probeHLSCandidateThroughProxy(
         headers: candidate.headers,
         kind: candidate.kind,
         cachedPlaylists: cachedPlaylists,
+        excludedVariantURLs: [],
         notice: nil
     )
     let proxy = try StreamProxyServer(stream: extracted)
@@ -716,6 +728,7 @@ struct BrowserProfile {
 private struct CandidateSelection {
     let candidate: StreamCandidate
     let kind: StreamKind
+    let excludedVariantURLs: Set<String>
     let notice: String?
 }
 
@@ -1004,7 +1017,7 @@ final class ChromeBrowserSession: @unchecked Sendable {
             }
             let remaining = max(deadline.timeIntervalSinceNow, 0.5)
             guard let iframeSource = await pollForIframeSource(timeout: remaining),
-                  let iframeURL = URL(string: iframeSource)
+                  let iframeURL = safeURL(from: iframeSource)
             else {
                 return
             }
@@ -1061,6 +1074,39 @@ final class ChromeBrowserSession: @unchecked Sendable {
         })()
         """
         return try await evaluateString(script) ?? ""
+    }
+
+    func fetchBinaryResource(at url: URL, timeout: TimeInterval) async throws -> Data {
+        let urlLiteral = quotedJavaScriptLiteral(url.absoluteString)
+        let script = """
+        (async () => {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(new Error("Pollux binary fetch timed out")), \(Int(timeout * 1000)));
+          try {
+            const response = await fetch(\(urlLiteral), { signal: controller.signal });
+            const blob = await response.blob();
+            const dataURL = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result || "");
+              reader.onerror = () => reject(reader.error || new Error("Failed to read fetched blob"));
+              reader.readAsDataURL(blob);
+            });
+            clearTimeout(timeoutId);
+            return dataURL;
+          } catch (error) {
+            clearTimeout(timeoutId);
+            return "ERROR: " + error.toString();
+          }
+        })()
+        """
+        let result = try await evaluateString(script) ?? ""
+        if result.hasPrefix("ERROR:") {
+            throw PolluxError.unexpected(result)
+        }
+        guard let data = decodeBase64DataURL(result) else {
+            throw PolluxError.unexpected("Browser binary fetch returned undecodable data.")
+        }
+        return data
     }
 
     func close() async {
@@ -1382,9 +1428,7 @@ private actor CaptureCollector {
     }
 
     private func matchesPattern(_ url: String) -> Bool {
-        guard let parsed = URL(string: url) else {
-            return false
-        }
+        let parsed = getPathAndExtension(from: url)
         let path = parsed.path
         let nsRange = NSRange(location: 0, length: (path as NSString).length)
         return patterns.contains { expression in
@@ -1397,9 +1441,7 @@ private actor CaptureCollector {
     }
 
     private func rankURL(_ rawURL: String) -> Int {
-        guard let parsed = URL(string: rawURL) else {
-            return 0
-        }
+        let parsed = getPathAndExtension(from: rawURL)
         let path = parsed.path.lowercased()
         var score = 0
 

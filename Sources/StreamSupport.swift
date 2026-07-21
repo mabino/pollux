@@ -158,7 +158,12 @@ enum StreamKind: String, Sendable {
     }
 
     static func detect(url: URL, mimeType: String?) -> StreamKind? {
-        if let fromExtension = fromExtension(url.pathExtension) {
+        return detect(urlString: url.absoluteString, mimeType: mimeType)
+    }
+
+    static func detect(urlString: String, mimeType: String?) -> StreamKind? {
+        let parsed = getPathAndExtension(from: urlString)
+        if let fromExtension = fromExtension(parsed.pathExtension) {
             return fromExtension
         }
 
@@ -256,6 +261,7 @@ struct ExtractedStream: Sendable {
     let headers: [String: String]
     let kind: StreamKind
     let cachedPlaylists: [String: String]
+    let excludedVariantURLs: Set<String>
     let notice: String?
     let session: ChromeBrowserSession?
 
@@ -265,6 +271,7 @@ struct ExtractedStream: Sendable {
         headers: [String: String],
         kind: StreamKind,
         cachedPlaylists: [String: String],
+        excludedVariantURLs: Set<String> = [],
         notice: String?,
         session: ChromeBrowserSession? = nil
     ) {
@@ -273,6 +280,7 @@ struct ExtractedStream: Sendable {
         self.headers = headers
         self.kind = kind
         self.cachedPlaylists = cachedPlaylists
+        self.excludedVariantURLs = excludedVariantURLs
         self.notice = notice
         self.session = session
     }
@@ -487,6 +495,66 @@ func rewritePlaylistData(_ data: Data, playlistURL: URL, proxyURL: (URL) -> URL)
     return Data(rewrittenLines.joined(separator: "\n").utf8)
 }
 
+func filterExcludedVariantsFromMasterPlaylist(_ data: Data, playlistURL: URL, excludedVariantURLs: Set<String>) -> Data {
+    guard !excludedVariantURLs.isEmpty else {
+        return data
+    }
+
+    let source = String(decoding: data, as: UTF8.self)
+    let lines = source.replacingOccurrences(of: "\r\n", with: "\n")
+        .split(separator: "\n", omittingEmptySubsequences: false)
+
+    var filtered: [String] = []
+    var pendingVariantTag: String?
+
+    for rawLine in lines {
+        let line = String(rawLine)
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+        if let pendingVariantTagValue = pendingVariantTag {
+            guard !trimmed.isEmpty,
+                  let absoluteURL = URL(string: trimmed, relativeTo: playlistURL)?.absoluteURL
+            else {
+                filtered.append(pendingVariantTagValue)
+                filtered.append(line)
+                pendingVariantTag = nil
+                continue
+            }
+
+            if excludedVariantURLs.contains(absoluteURL.absoluteString) {
+                pendingVariantTag = nil
+                continue
+            }
+
+            filtered.append(pendingVariantTagValue)
+            filtered.append(line)
+            pendingVariantTag = nil
+            continue
+        }
+
+        if trimmed.hasPrefix("#EXT-X-STREAM-INF") {
+            pendingVariantTag = line
+            continue
+        }
+
+        if trimmed.hasPrefix("#EXT-X-I-FRAME-STREAM-INF") || trimmed.hasPrefix("#EXT-X-MEDIA") {
+            let attributeURLs = attributeURIValues(in: line)
+                .compactMap { URL(string: $0, relativeTo: playlistURL)?.absoluteURL.absoluteString }
+            if attributeURLs.contains(where: excludedVariantURLs.contains) {
+                continue
+            }
+        }
+
+        filtered.append(line)
+    }
+
+    if let pendingVariantTag {
+        filtered.append(pendingVariantTag)
+    }
+
+    return Data(filtered.joined(separator: "\n").utf8)
+}
+
 func stripPNGHeaderIfNeeded(_ data: Data) -> Data {
     guard looksLikePNG(data) else {
         return data
@@ -497,6 +565,18 @@ func stripPNGHeaderIfNeeded(_ data: Data) -> Data {
         return data
     }
     return data[endRange.upperBound...]
+}
+
+func decodeBase64DataURL(_ rawValue: String) -> Data? {
+    guard let commaIndex = rawValue.firstIndex(of: ",") else {
+        return nil
+    }
+    let metadata = rawValue[..<commaIndex].lowercased()
+    guard metadata.hasPrefix("data:"), metadata.contains(";base64") else {
+        return nil
+    }
+    let payloadStart = rawValue.index(after: commaIndex)
+    return Data(base64Encoded: String(rawValue[payloadStart...]))
 }
 
 enum ProxyURLBuilder {
@@ -523,6 +603,19 @@ enum ProxyURLBuilder {
             return ".m3u8"
         }
         return ".bin"
+    }
+}
+
+func proxyContentType(for url: URL) -> String {
+    switch url.pathExtension.lowercased() {
+    case "ts":
+        return "video/mp2t"
+    case "mp4", "m4v", "m4s":
+        return "video/mp4"
+    case "aac":
+        return "audio/aac"
+    default:
+        return "application/octet-stream"
     }
 }
 
@@ -608,4 +701,37 @@ func sanitizedReason(_ rawReason: String, fallback: String) -> String {
         return trimmed
     }
     return String(trimmed.prefix(237)) + "..."
+}
+
+func safeURL(from string: String) -> URL? {
+    if let url = URL(string: string) {
+        return url
+    }
+    var allowed = CharacterSet.urlQueryAllowed
+    allowed.formUnion(CharacterSet.urlPathAllowed)
+    allowed.formUnion(CharacterSet.urlHostAllowed)
+    allowed.formUnion(CharacterSet.urlUserAllowed)
+    allowed.formUnion(CharacterSet.urlPasswordAllowed)
+    if let encoded = string.addingPercentEncoding(withAllowedCharacters: allowed) {
+        return URL(string: encoded)
+    }
+    return nil
+}
+
+func getPathAndExtension(from urlString: String) -> (path: String, pathExtension: String) {
+    let base = urlString.split(separator: "?", maxSplits: 1).first.map(String.init) ?? urlString
+    let stripped = base.split(separator: "#", maxSplits: 1).first.map(String.init) ?? base
+    var path = stripped
+    if let schemeRange = stripped.range(of: "://") {
+        let rest = stripped[schemeRange.upperBound...]
+        if let firstSlash = rest.firstIndex(of: "/") {
+            path = String(rest[firstSlash...])
+        } else {
+            path = "/"
+        }
+    }
+    let lastPathComponent = path.split(separator: "/").last.map(String.init) ?? ""
+    let parts = lastPathComponent.split(separator: ".")
+    let pathExtension = parts.count > 1 ? String(parts.last!) : ""
+    return (path, pathExtension)
 }

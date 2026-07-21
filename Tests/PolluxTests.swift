@@ -63,6 +63,27 @@ final class PolluxTests: XCTestCase {
         )
     }
 
+    func testFilterExcludedVariantsFromMasterPlaylistRemovesRejectedVariant() throws {
+        let playlistURL = try XCTUnwrap(URL(string: "https://cdn.example.com/root/master.m3u8"))
+        let playlist = """
+        #EXTM3U
+        #EXT-X-STREAM-INF:BANDWIDTH=8000000
+        high/mono.m3u8
+        #EXT-X-STREAM-INF:BANDWIDTH=700000
+        low/mono.m3u8
+        """
+
+        let filtered = filterExcludedVariantsFromMasterPlaylist(
+            Data(playlist.utf8),
+            playlistURL: playlistURL,
+            excludedVariantURLs: ["https://cdn.example.com/root/high/mono.m3u8"]
+        )
+        let filteredText = String(decoding: filtered, as: UTF8.self)
+
+        XCTAssertFalse(filteredText.contains("high/mono.m3u8"))
+        XCTAssertTrue(filteredText.contains("low/mono.m3u8"))
+    }
+
     func testPreferredPlaybackCandidatesDropsMasterWhenVariantExists() throws {
         let masterURL = try XCTUnwrap(URL(string: "https://cdn.example.com/root/playlist.m3u8"))
         let variantURL = try XCTUnwrap(URL(string: "https://cdn.example.com/root/low/mono.m3u8"))
@@ -88,6 +109,12 @@ final class PolluxTests: XCTestCase {
         let iend = Data([0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82])
         let wrapped = pngHeader + Data(repeating: 0x00, count: 8) + iend + payload
         XCTAssertEqual(stripPNGHeaderIfNeeded(wrapped), payload)
+    }
+
+    func testDecodeBase64DataURL() {
+        let raw = "data:video/mp2t;base64,SGVsbG8="
+        XCTAssertEqual(decodeBase64DataURL(raw), Data("Hello".utf8))
+        XCTAssertNil(decodeBase64DataURL("not-a-data-url"))
     }
 
     func testLocateExecutableUsesStoredPreferenceOverride() throws {
@@ -123,6 +150,32 @@ final class PolluxTests: XCTestCase {
             permissionResetArguments(for: .appManagement, bundleIdentifier: "io.github.mabino.pollux"),
             ["reset", "AppManagement", "io.github.mabino.pollux"]
         )
+    }
+
+    func testAcceptsHLSProbeResultWithPotentialVideoAndAudio() {
+        let result = ProbeResult(
+            kind: .hls,
+            bitRate: 0,
+            hasVideo: false,
+            hasAudio: true,
+            hasPotentialVideo: true
+        )
+
+        XCTAssertTrue(acceptsProbeResult(result, for: .hls))
+        XCTAssertNotNil(probeResultNotice(result, for: .hls))
+    }
+
+    func testRejectsImageOnlyHLSProbeResult() {
+        let result = ProbeResult(
+            kind: .hls,
+            bitRate: 0,
+            hasVideo: false,
+            hasAudio: false,
+            hasPotentialVideo: false
+        )
+
+        XCTAssertFalse(acceptsProbeResult(result, for: .hls))
+        XCTAssertNil(probeResultNotice(result, for: .hls))
     }
 
     func testCanonicalizedHeadersStripsHostHeader() throws {
