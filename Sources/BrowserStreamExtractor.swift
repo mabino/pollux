@@ -159,18 +159,23 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                 return
             }
 
+            // Step 1: Check for Cloudflare Turnstile challenge first
             Task { @MainActor in
-                ExtractionLogger.shared.append("Clicking player viewport center (x: \(profile.centerX), y: \(profile.centerY))...")
+                ExtractionLogger.shared.append("Checking for Cloudflare Turnstile challenge...")
             }
-            try? await session.click(x: profile.centerX, y: profile.centerY)
+            try? await session.bypassTurnstile(
+                solveTimeout: settings.turnstileSolveTimeout,
+                retryTimeout: settings.turnstileRetryTimeout
+            )
 
             if await collector.hasHits() {
                 Task { @MainActor in
-                    ExtractionLogger.shared.append("Media candidate captured after viewport click.")
+                    ExtractionLogger.shared.append("Media candidate captured after Turnstile check.")
                 }
                 return
             }
 
+            // Step 2: Poll for iframe and navigate into iframe if present
             if let iframeSource = await session.pollForIframeSource(timeout: 2.0),
                let iframeURL = URL(string: iframeSource) {
                 if iframeURL != session.currentURL {
@@ -188,6 +193,20 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                 return
             }
 
+            // Step 3: Viewport click
+            Task { @MainActor in
+                ExtractionLogger.shared.append("Clicking player viewport center (x: \(profile.centerX), y: \(profile.centerY))...")
+            }
+            try? await session.click(x: profile.centerX, y: profile.centerY)
+
+            if await collector.hasHits() {
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("Media candidate captured after viewport click.")
+                }
+                return
+            }
+
+            // Step 4: HTML5 play controls
             Task { @MainActor in
                 ExtractionLogger.shared.append("Querying and clicking HTML5 play controls...")
             }
@@ -196,21 +215,6 @@ final class BrowserStreamExtractor: @unchecked Sendable {
             if await collector.hasHits() {
                 Task { @MainActor in
                     ExtractionLogger.shared.append("Media candidate captured after clicking play controls.")
-                }
-                return
-            }
-
-            Task { @MainActor in
-                ExtractionLogger.shared.append("Checking for Cloudflare Turnstile challenge...")
-            }
-            try? await session.bypassTurnstile(
-                solveTimeout: settings.turnstileSolveTimeout,
-                retryTimeout: settings.turnstileRetryTimeout
-            )
-
-            if await collector.hasHits() {
-                Task { @MainActor in
-                    ExtractionLogger.shared.append("Media candidate captured after Turnstile check.")
                 }
                 return
             }
@@ -763,17 +767,22 @@ final class ChromeBrowserSession: @unchecked Sendable {
 
     private static let turnstilePositionScript = """
     (function() {
-        const c = document.querySelector('.cf-turnstile');
-        if (!c) return null;
-        const f = c.querySelector('iframe');
+        const f = document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"], .cf-turnstile iframe');
         if (!f) return null;
         const r = f.getBoundingClientRect();
         if (r.width < 10 || r.height < 10) return null;
-        return {x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2)};
+        return {x: Math.round(r.x + Math.min(35, r.width / 2)), y: Math.round(r.y + r.height / 2)};
     })()
     """
 
-    private static let turnstileGoneScript = "document.querySelector('.cf-turnstile') === null"
+    private static let turnstileGoneScript = """
+    (function() {
+        const resp = document.querySelector('[name="cf-turnstile-response"]');
+        if (resp && resp.value && resp.value.length > 0) return true;
+        const f = document.querySelector('iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"], .cf-turnstile iframe');
+        return f === null;
+    })()
+    """
     private static let startupTimeout: TimeInterval = 30
     private static let targetDiscoveryTimeout: TimeInterval = 15
 
@@ -957,7 +966,12 @@ final class ChromeBrowserSession: @unchecked Sendable {
     }
 
     func bypassTurnstile(solveTimeout: TimeInterval, retryTimeout: TimeInterval) async throws {
-        guard try await evaluateBool("document.querySelector('.cf-turnstile') !== null") else {
+        let hasTurnstileScript = """
+        (function() {
+            return document.querySelector('.cf-turnstile, iframe[src*="challenges.cloudflare.com"], iframe[src*="turnstile"]') !== null;
+        })()
+        """
+        guard try await evaluateBool(hasTurnstileScript) else {
             return
         }
 
