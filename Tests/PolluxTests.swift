@@ -200,4 +200,19 @@ final class PolluxTests: XCTestCase {
         let pageURL = try XCTUnwrap(URL(string: "https://example.com/watch/philadelphia-phillies-vs-los-angeles-dodgers-2388377/admin/1"))
         XCTAssertEqual(pageURL.scheme, "https")
     }
+
+    func testSafeURLAndPathExtensionParsing() throws {
+        // A token URL containing characters that require percent encoding
+        let rawURL = "https://lb11.cdn-stream.example/secure/IKXwxNXuoIEAAhWbXuuPbTsXJiuZAfbJ/rtmp/stream/lNAs5o6_rC8cGmMqGKoVKBb_pfc5xlP1Dlaz3OlrQfP9dXQ3PLsnvhV2UlbGSIWZLzUmfLfVmOZu-gR90fUokw/1/playlist.m3u8?token=abc 123"
+        
+        // 1. Verify safeURL(from:) successfully creates a valid URL and normalizes spaces
+        let url = try XCTUnwrap(safeURL(from: rawURL))
+        XCTAssertEqual(url.host, "lb11.cdn-stream.example")
+        XCTAssertTrue(url.absoluteString.contains("token=abc%20123"))
+        
+        // 2. Verify getPathAndExtension(from:) correctly parses the path and extension
+        let parsed = getPathAndExtension(from: rawURL)
+        XCTAssertEqual(parsed.path, "/secure/IKXwxNXuoIEAAhWbXuuPbTsXJiuZAfbJ/rtmp/stream/lNAs5o6_rC8cGmMqGKoVKBb_pfc5xlP1Dlaz3OlrQfP9dXQ3PLsnvhV2UlbGSIWZLzUmfLfVmOZu-gR90fUokw/1/playlist.m3u8")
+        XCTAssertEqual(parsed.pathExtension, "m3u8")
+    }
 }
