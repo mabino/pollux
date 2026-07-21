@@ -173,7 +173,8 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                 return
             }
 
-            // Probe page state
+            // Probe page state using CDP DOM domain (doesn't require JS main thread)
+            var jsMainThreadBlocked = false
             do {
                 let domSummaryScript = """
                 (() => {
@@ -190,22 +191,25 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     }
                 }
             } catch {
+                jsMainThreadBlocked = true
                 Task { @MainActor in
-                    ExtractionLogger.shared.append("DOM eval error: \(error.localizedDescription)")
+                    ExtractionLogger.shared.append("JS main thread blocked (eval timeout). Using CDP DOM snapshot...")
                 }
-                // Try a minimal probe to see if CDP is responding at all
-                if let title = try? await session.evaluateString("document.title") {
+                // Fallback: use CDP DOM domain which bypasses JS main thread
+                if let htmlSnippet = try? await session.getOuterHTMLSnippet(maxLength: 500) {
                     Task { @MainActor in
-                        ExtractionLogger.shared.append("Page title: \(title)")
+                        ExtractionLogger.shared.append("Page HTML: \(htmlSnippet)")
                     }
                 }
             }
 
-            // Step 1: Check for Cloudflare Turnstile challenge first
-            try? await session.bypassTurnstile(
-                solveTimeout: settings.turnstileSolveTimeout,
-                retryTimeout: settings.turnstileRetryTimeout
-            )
+            // Step 1: Check for Cloudflare Turnstile challenge (skip if JS thread is blocked)
+            if !jsMainThreadBlocked {
+                try? await session.bypassTurnstile(
+                    solveTimeout: settings.turnstileSolveTimeout,
+                    retryTimeout: settings.turnstileRetryTimeout
+                )
+            }
 
             if await collector.hasHits() {
                 Task { @MainActor in
@@ -1065,10 +1069,30 @@ final class ChromeBrowserSession: @unchecked Sendable {
         ChromiumProcessTracker.shared.terminateSession(id: id)
     }
 
+    /// Get a snippet of the page HTML using CDP DOM domain (bypasses JS main thread).
+    func getOuterHTMLSnippet(maxLength: Int = 500) async throws -> String? {
+        let docPayload = try await connection.call("DOM.getDocument", params: ["depth": 0], timeout: 3.0)
+        let docResult = try jsonDictionary(from: docPayload)
+        guard let root = docResult["root"] as? [String: Any],
+              let nodeId = root["nodeId"] as? Int else {
+            return nil
+        }
+        let htmlPayload = try await connection.call("DOM.getOuterHTML", params: ["nodeId": nodeId], timeout: 3.0)
+        let htmlResult = try jsonDictionary(from: htmlPayload)
+        guard let outerHTML = htmlResult["outerHTML"] as? String else {
+            return nil
+        }
+        if outerHTML.count > maxLength {
+            return String(outerHTML.prefix(maxLength)) + "..."
+        }
+        return outerHTML
+    }
+
     private func configure(profile: BrowserProfile) async throws {
         _ = try await connection.call("Page.enable", params: [:])
         _ = try await connection.call("Runtime.enable", params: [:])
         _ = try await connection.call("Network.enable", params: [:])
+        _ = try await connection.call("DOM.enable", params: [:])
         _ = try? await connection.call("Emulation.setAutomationOverride", params: ["enabled": false])
         _ = try? await connection.call("Emulation.setFocusEmulationEnabled", params: ["enabled": true])
         _ = try await connection.call("Page.addScriptToEvaluateOnNewDocument", params: [
