@@ -160,9 +160,6 @@ final class BrowserStreamExtractor: @unchecked Sendable {
             }
 
             // Step 1: Check for Cloudflare Turnstile challenge first
-            Task { @MainActor in
-                ExtractionLogger.shared.append("Checking for Cloudflare Turnstile challenge...")
-            }
             try? await session.bypassTurnstile(
                 solveTimeout: settings.turnstileSolveTimeout,
                 retryTimeout: settings.turnstileRetryTimeout
@@ -558,8 +555,8 @@ private struct ExtractionSettings {
     let maxCachedPlaylists = 12
     let navigateIframeTimeout: TimeInterval = 10
     let navigateIframeMaxDepth = 5
-    let turnstileSolveTimeout: TimeInterval = 20
-    let turnstileRetryTimeout: TimeInterval = 10
+    let turnstileSolveTimeout: TimeInterval = 3
+    let turnstileRetryTimeout: TimeInterval = 2
     let capturePatterns = [
         #"\.m3u8"#,
         #"master\.m3u8"#,
@@ -975,12 +972,9 @@ final class ChromeBrowserSession: @unchecked Sendable {
             return
         }
 
-        if await attemptTurnstileSolve(timeout: solveTimeout) {
-            return
+        Task { @MainActor in
+            ExtractionLogger.shared.append("Detected Cloudflare Turnstile challenge. Attempting click solve...")
         }
-
-        _ = try await connection.call("Page.reload", params: [:])
-        try await waitForDocumentReady(timeout: retryTimeout)
         _ = await attemptTurnstileSolve(timeout: solveTimeout)
     }
 
