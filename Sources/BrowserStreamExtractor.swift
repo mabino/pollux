@@ -1140,7 +1140,7 @@ final class ChromeBrowserSession: @unchecked Sendable {
             "expression": script,
             "awaitPromise": true,
             "returnByValue": true,
-        ])
+        ], timeout: 2.0)
         let result = try jsonDictionary(from: payload)
 
         if let exception = result["exceptionDetails"] as? [String: Any],
@@ -1401,16 +1401,12 @@ private actor CDPConnection {
 
         return try await withThrowingTaskGroup(of: Data.self) { group in
             group.addTask {
-                try await withCheckedThrowingContinuation { continuation in
+                let data = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
                     Task {
-                        await self.storePendingCall(id: identifier, continuation: continuation)
-                        do {
-                            try await self.webSocket.send(.string(message))
-                        } catch {
-                            await self.failPendingCall(id: identifier, error: error)
-                        }
+                        await self.sendAndRegisterCall(id: identifier, message: message, continuation: continuation)
                     }
                 }
+                return data
             }
 
             group.addTask {
@@ -1424,6 +1420,17 @@ private actor CDPConnection {
             }
             group.cancelAll()
             return result
+        }
+    }
+
+    private func sendAndRegisterCall(id: Int, message: String, continuation: CheckedContinuation<Data, Error>) {
+        pendingCalls[id] = continuation
+        webSocket.send(.string(message)) { error in
+            if let error {
+                Task {
+                    await self.failPendingCall(id: id, error: error)
+                }
+            }
         }
     }
 
