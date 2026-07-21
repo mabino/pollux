@@ -402,7 +402,7 @@ private struct ProxyRequest {
 
         let method = String(components[0]).uppercased()
         let target = String(components[1])
-        guard let url = URL(string: "http://127.0.0.1\(target)") else {
+        guard let url = safeURL(from: "http://127.0.0.1\(target)") else {
             throw PolluxError.proxyStartFailed("The playback proxy received an invalid local target.")
         }
 

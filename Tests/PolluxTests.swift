@@ -215,4 +215,14 @@ final class PolluxTests: XCTestCase {
         XCTAssertEqual(parsed.path, "/secure/IKXwxNXuoIEAAhWbXuuPbTsXJiuZAfbJ/rtmp/stream/lNAs5o6_rC8cGmMqGKoVKBb_pfc5xlP1Dlaz3OlrQfP9dXQ3PLsnvhV2UlbGSIWZLzUmfLfVmOZu-gR90fUokw/1/playlist.m3u8")
         XCTAssertEqual(parsed.pathExtension, "m3u8")
     }
+
+    func testSafeRelativeURLResolution() throws {
+        let baseURL = try XCTUnwrap(URL(string: "https://lb11.cdn-stream.example/secure/rtmp/stream/1/playlist.m3u8"))
+        
+        // A relative path containing unescaped spaces
+        let relativePath = "high/mono.m3u8?token=abc 123"
+        let resolved = try XCTUnwrap(safeURL(from: relativePath, relativeTo: baseURL))
+        
+        XCTAssertEqual(resolved.absoluteString, "https://lb11.cdn-stream.example/secure/rtmp/stream/1/high/mono.m3u8?token=abc%20123")
+    }
 }

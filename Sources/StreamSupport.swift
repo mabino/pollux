@@ -446,7 +446,7 @@ func referencedHLSPlaylistURLs(in playlist: String, playlistURL: URL) -> [URL] {
 
         if trimmed.hasPrefix("#") {
             for attributeURL in attributeURIValues(in: trimmed) {
-                guard let absoluteURL = URL(string: attributeURL, relativeTo: playlistURL)?.absoluteURL,
+                guard let absoluteURL = safeURL(from: attributeURL, relativeTo: playlistURL)?.absoluteURL,
                       StreamKind.detect(url: absoluteURL, mimeType: nil) == .hls,
                       seen.insert(absoluteURL.absoluteString).inserted
                 else {
@@ -457,7 +457,7 @@ func referencedHLSPlaylistURLs(in playlist: String, playlistURL: URL) -> [URL] {
             continue
         }
 
-        guard let absoluteURL = URL(string: trimmed, relativeTo: playlistURL)?.absoluteURL,
+        guard let absoluteURL = safeURL(from: trimmed, relativeTo: playlistURL)?.absoluteURL,
               StreamKind.detect(url: absoluteURL, mimeType: nil) == .hls,
               seen.insert(absoluteURL.absoluteString).inserted
         else {
@@ -486,7 +486,7 @@ func rewritePlaylistData(_ data: Data, playlistURL: URL, proxyURL: (URL) -> URL)
             return rewriteAttributeURIs(in: line, playlistURL: playlistURL, proxyURL: proxyURL)
         }
 
-        guard let absoluteURL = URL(string: trimmed, relativeTo: playlistURL)?.absoluteURL else {
+        guard let absoluteURL = safeURL(from: trimmed, relativeTo: playlistURL)?.absoluteURL else {
             return line
         }
         return proxyURL(absoluteURL).absoluteString
@@ -513,7 +513,7 @@ func filterExcludedVariantsFromMasterPlaylist(_ data: Data, playlistURL: URL, ex
 
         if let pendingVariantTagValue = pendingVariantTag {
             guard !trimmed.isEmpty,
-                  let absoluteURL = URL(string: trimmed, relativeTo: playlistURL)?.absoluteURL
+                  let absoluteURL = safeURL(from: trimmed, relativeTo: playlistURL)?.absoluteURL
             else {
                 filtered.append(pendingVariantTagValue)
                 filtered.append(line)
@@ -539,7 +539,7 @@ func filterExcludedVariantsFromMasterPlaylist(_ data: Data, playlistURL: URL, ex
 
         if trimmed.hasPrefix("#EXT-X-I-FRAME-STREAM-INF") || trimmed.hasPrefix("#EXT-X-MEDIA") {
             let attributeURLs = attributeURIValues(in: line)
-                .compactMap { URL(string: $0, relativeTo: playlistURL)?.absoluteURL.absoluteString }
+                .compactMap { safeURL(from: $0, relativeTo: playlistURL)?.absoluteURL.absoluteString }
             if attributeURLs.contains(where: excludedVariantURLs.contains) {
                 continue
             }
@@ -593,11 +593,10 @@ enum ProxyURLBuilder {
     }
 
     static func proxyExtension(for rawTargetURL: String) -> String {
-        if let parsed = URL(string: rawTargetURL) {
-            let pathExtension = parsed.pathExtension.lowercased()
-            if !pathExtension.isEmpty {
-                return ".\(pathExtension)"
-            }
+        let parsed = getPathAndExtension(from: rawTargetURL)
+        let pathExtension = parsed.pathExtension.lowercased()
+        if !pathExtension.isEmpty {
+            return ".\(pathExtension)"
         }
         if rawTargetURL.lowercased().contains(".m3u8") {
             return ".m3u8"
@@ -663,7 +662,7 @@ private func rewriteAttributeURIs(in line: String, playlistURL: URL, proxyURL: (
         let attributeRange = match.range
         let valueRange = match.range(at: 1)
         let rawValue = nsLine.substring(with: valueRange)
-        guard let absoluteURL = URL(string: rawValue, relativeTo: playlistURL)?.absoluteURL,
+        guard let absoluteURL = safeURL(from: rawValue, relativeTo: playlistURL)?.absoluteURL,
               let replacementRange = Range(attributeRange, in: rewritten)
         else {
             continue
@@ -716,6 +715,38 @@ func safeURL(from string: String) -> URL? {
         return URL(string: encoded)
     }
     return nil
+}
+
+func safeURL(from string: String, relativeTo baseURL: URL) -> URL? {
+    if let url = URL(string: string, relativeTo: baseURL) {
+        return url
+    }
+    let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+    var absoluteString = trimmed
+    if trimmed.starts(with: "//") {
+        absoluteString = (baseURL.scheme ?? "https") + ":" + trimmed
+    } else if !trimmed.contains("://") {
+        if trimmed.starts(with: "/") {
+            if let host = baseURL.host {
+                let portStr = baseURL.port.map { ":\($0)" } ?? ""
+                let scheme = baseURL.scheme ?? "https"
+                absoluteString = "\(scheme)://\(host)\(portStr)\(trimmed)"
+            }
+        } else {
+            var baseParts = baseURL.path.split(separator: "/")
+            if !baseParts.isEmpty && !baseURL.path.hasSuffix("/") {
+                baseParts.removeLast()
+            }
+            let basePath = baseParts.isEmpty ? "" : "/" + baseParts.joined(separator: "/")
+            let prefix = basePath.hasSuffix("/") ? basePath : basePath + "/"
+            if let host = baseURL.host {
+                let portStr = baseURL.port.map { ":\($0)" } ?? ""
+                let scheme = baseURL.scheme ?? "https"
+                absoluteString = "\(scheme)://\(host)\(portStr)\(prefix)\(trimmed)"
+            }
+        }
+    }
+    return safeURL(from: absoluteString)
 }
 
 func getPathAndExtension(from urlString: String) -> (path: String, pathExtension: String) {
