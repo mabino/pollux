@@ -21,7 +21,8 @@ final class BrowserStreamExtractor: @unchecked Sendable {
             if method == "Network.requestWillBeSent",
                let dict = try? JSONSerialization.jsonObject(with: params) as? [String: Any],
                let req = dict["request"] as? [String: Any],
-               let url = req["url"] as? String {
+               let url = req["url"] as? String,
+               !url.hasSuffix(".png"), !url.hasSuffix(".jpg"), !url.hasSuffix(".svg"), !url.hasSuffix(".css"), !url.hasSuffix(".woff2") {
                 Task { @MainActor in
                     ExtractionLogger.shared.append("CDP Request: \(url)")
                 }
@@ -29,9 +30,16 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                       let dict = try? JSONSerialization.jsonObject(with: params) as? [String: Any],
                       let response = dict["response"] as? [String: Any],
                       let url = response["url"] as? String,
-                      let status = response["status"] as? Int {
+                      let status = response["status"] as? Int,
+                      !url.hasSuffix(".png"), !url.hasSuffix(".jpg"), !url.hasSuffix(".svg"), !url.hasSuffix(".css"), !url.hasSuffix(".woff2") {
                 Task { @MainActor in
                     ExtractionLogger.shared.append("CDP Response [\(status)]: \(url)")
+                }
+            } else if method == "Runtime.consoleAPICalled",
+                      let dict = try? JSONSerialization.jsonObject(with: params) as? [String: Any],
+                      let type = dict["type"] as? String {
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("Console [\(type)]: \(dict["args"] ?? "")")
                 }
             }
         }
@@ -157,6 +165,19 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     ExtractionLogger.shared.append("Media candidate captured: proceeding to validate.")
                 }
                 return
+            }
+
+            let domSummaryScript = """
+            (() => {
+              const iframes = Array.from(document.querySelectorAll('iframe')).map(i => i.src || i.getAttribute('data-src') || 'no-src');
+              const videos = document.querySelectorAll('video').length;
+              return `readyState=${document.readyState}, iframes=${iframes.length} [${iframes.prefix(3).join(', ')}], videos=${videos}`;
+            })()
+            """
+            if let summary = try? await session.evaluateString(domSummaryScript) {
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("DOM State: \(summary)")
+                }
             }
 
             // Step 1: Check for Cloudflare Turnstile challenge first
