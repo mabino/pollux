@@ -45,6 +45,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
         }
 
         do {
+            let overallDeadline = Date().addingTimeInterval(settings.extractionTimeout)
             return try await withTimeout(seconds: settings.extractionTimeout) { [self] in
                 try Task.checkCancellation()
                 onProgress?("Navigating to target page...", 0.25)
@@ -64,7 +65,12 @@ final class BrowserStreamExtractor: @unchecked Sendable {
 
                 try Task.checkCancellation()
                 onProgress?("Inspecting player & searching streams...", 0.45)
-                try await self.runActionPipeline(session: session, collector: collector, profile: profile)
+                try await self.runActionPipeline(
+                    session: session,
+                    collector: collector,
+                    profile: profile,
+                    deadline: overallDeadline.addingTimeInterval(-25)
+                )
 
                 try Task.checkCancellation()
                 onProgress?("Capturing network media requests...", 0.70)
@@ -151,9 +157,9 @@ final class BrowserStreamExtractor: @unchecked Sendable {
     private func runActionPipeline(
         session: ChromeBrowserSession,
         collector: CaptureCollector,
-        profile: BrowserProfile
+        profile: BrowserProfile,
+        deadline: Date
     ) async throws {
-        let deadline = Date().addingTimeInterval(settings.browserTimeout)
         Task { @MainActor in
             ExtractionLogger.shared.append("Starting player interaction pipeline...")
         }
