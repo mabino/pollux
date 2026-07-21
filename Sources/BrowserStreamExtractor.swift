@@ -146,40 +146,72 @@ final class BrowserStreamExtractor: @unchecked Sendable {
         profile: BrowserProfile
     ) async throws {
         let deadline = Date().addingTimeInterval(settings.browserTimeout)
+        Task { @MainActor in
+            ExtractionLogger.shared.append("Starting player interaction pipeline...")
+        }
 
         while Date() < deadline {
+            try Task.checkCancellation()
             if await collector.hasHits() {
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("Media candidate captured: proceeding to validate.")
+                }
+                return
+            }
+
+            Task { @MainActor in
+                ExtractionLogger.shared.append("Clicking player viewport center (x: \(profile.centerX), y: \(profile.centerY))...")
+            }
+            try? await session.click(x: profile.centerX, y: profile.centerY)
+
+            if await collector.hasHits() {
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("Media candidate captured after viewport click.")
+                }
                 return
             }
 
             if let iframeSource = await session.pollForIframeSource(timeout: 2.0),
                let iframeURL = URL(string: iframeSource) {
-                print("[CDP Pipeline] Found iframe: \(iframeURL.absoluteString)")
-                try? await session.navigate(to: iframeURL, referrer: session.currentURL?.absoluteString, timeout: 3)
+                if iframeURL != session.currentURL {
+                    Task { @MainActor in
+                        ExtractionLogger.shared.append("Discovered player iframe: \(iframeURL.absoluteString). Navigating browser into iframe...")
+                    }
+                    try? await session.navigate(to: iframeURL, referrer: session.currentURL?.absoluteString, timeout: 5)
+                }
             }
 
             if await collector.hasHits() {
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("Media candidate captured inside iframe.")
+                }
                 return
             }
 
+            Task { @MainActor in
+                ExtractionLogger.shared.append("Querying and clicking HTML5 play controls...")
+            }
             await session.clickPlayButtons()
 
             if await collector.hasHits() {
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("Media candidate captured after clicking play controls.")
+                }
                 return
             }
 
-            try? await session.click(x: profile.centerX, y: profile.centerY)
-
-            if await collector.hasHits() {
-                return
+            Task { @MainActor in
+                ExtractionLogger.shared.append("Checking for Cloudflare Turnstile challenge...")
             }
-
             try? await session.bypassTurnstile(
                 solveTimeout: settings.turnstileSolveTimeout,
                 retryTimeout: settings.turnstileRetryTimeout
             )
 
             if await collector.hasHits() {
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("Media candidate captured after Turnstile check.")
+                }
                 return
             }
 
@@ -680,16 +712,19 @@ final class ChromeBrowserSession: @unchecked Sendable {
       const iframes = document.querySelectorAll('iframe');
       let best = null, maxArea = 0;
       for (const f of iframes) {
-        const src = f.src || f.getAttribute('data-src') || f.getAttribute('data-url') || '';
+        let src = f.src || f.getAttribute('data-src') || f.getAttribute('data-url') || f.getAttribute('src') || '';
         if (!src || src.startsWith('about:') || src.startsWith('javascript:')) continue;
+        try { src = new URL(src, window.location.href).href; } catch(e) {}
         const r = f.getBoundingClientRect();
         const a = r.width * r.height;
-        if (a > maxArea && r.width > 50 && r.height > 50) { maxArea = a; best = src; }
+        if (a > maxArea) { maxArea = a; best = src; }
       }
       if (best) return best;
       for (const f of iframes) {
-        const src = f.src || f.getAttribute('data-src') || f.getAttribute('data-url') || '';
-        if (src && (src.startsWith('http://') || src.startsWith('https://'))) return src;
+        let src = f.src || f.getAttribute('data-src') || f.getAttribute('data-url') || f.getAttribute('src') || '';
+        if (!src || src.startsWith('about:') || src.startsWith('javascript:')) continue;
+        try { src = new URL(src, window.location.href).href; } catch(e) {}
+        if (src.startsWith('http://') || src.startsWith('https://')) return src;
       }
       return null;
     })()
