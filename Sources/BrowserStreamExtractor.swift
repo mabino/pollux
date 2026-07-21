@@ -590,12 +590,12 @@ private struct ExtractionSettings {
         #"index\.m3u8"#,
         #"/playlist"#,
         #"/manifest"#,
-        #"/hls"#,
+        #"/hls[/.]"#,
         #"\.mp4"#,
-        #"/stream"#,
-        #"/live"#,
+        #"/streams?/"#,
+        #"/live/"#,
         #"/chunklist"#,
-        #"/embed"#,
+        #"\.ts$"#,
     ]
     let maxCandidates = 100
 }
@@ -1322,10 +1322,13 @@ private actor CaptureCollector {
     }
 
     private func matchesPattern(_ url: String) -> Bool {
-        let stripped = url.split(separator: "?", maxSplits: 1).first.map(String.init) ?? url
-        let nsRange = NSRange(location: 0, length: (stripped as NSString).length)
+        guard let parsed = URL(string: url) else {
+            return false
+        }
+        let path = parsed.path
+        let nsRange = NSRange(location: 0, length: (path as NSString).length)
         return patterns.contains { expression in
-            expression.firstMatch(in: stripped, range: nsRange) != nil
+            expression.firstMatch(in: path, range: nsRange) != nil
         }
     }
 
