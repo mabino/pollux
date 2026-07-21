@@ -854,7 +854,6 @@ final class ChromeBrowserSession: @unchecked Sendable {
             "--disable-blink-features=AutomationControlled",
             "--disable-infobars",
             "--use-mock-keychain",
-            "--enable-features=NetworkService,NetworkServiceInProcess",
             "--disable-background-timer-throttling",
             "--disable-backgrounding-occluded-windows",
             "--disable-renderer-backgrounding",
