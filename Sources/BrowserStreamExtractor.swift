@@ -171,7 +171,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
             (() => {
               const iframes = Array.from(document.querySelectorAll('iframe')).map(i => i.src || i.getAttribute('data-src') || 'no-src');
               const videos = document.querySelectorAll('video').length;
-              return `readyState=${document.readyState}, iframes=${iframes.length} [${iframes.prefix(3).join(', ')}], videos=${videos}`;
+              return 'readyState=' + document.readyState + ', iframes=' + iframes.length + ' [' + iframes.slice(0, 3).join(', ') + '], videos=' + videos;
             })()
             """
             if let summary = try? await session.evaluateString(domSummaryScript) {
