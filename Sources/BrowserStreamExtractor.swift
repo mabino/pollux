@@ -561,6 +561,11 @@ private struct ExtractionSettings {
         #"master\.m3u8"#,
         #"index\.m3u8"#,
         #"/playlist/"#,
+        #"/manifest"#,
+        #"/hls/"#,
+        #"\.mp4"#,
+        #"/stream/"#,
+        #"/chunklist"#,
     ]
     let maxCandidates = 100
 }
@@ -578,15 +583,41 @@ struct BrowserProfile {
     var stealthScript: String {
         """
         (() => {
-          const patch = (target, key, value) => Object.defineProperty(target, key, {
-            get: () => value,
-            configurable: true
-          });
-          patch(navigator, 'webdriver', undefined);
+          const patch = (target, key, value) => {
+            try {
+              Object.defineProperty(target, key, {
+                get: () => value,
+                configurable: true
+              });
+            } catch(e) {}
+          };
+          patch(navigator, 'webdriver', false);
+          patch(navigator, 'hardwareConcurrency', 8);
+          patch(navigator, 'deviceMemory', 8);
           patch(navigator, 'platform', '\(platform)');
           patch(navigator, 'languages', ['en-US', 'en']);
-          patch(navigator, 'plugins', [1, 2, 3, 4, 5]);
-          window.chrome = window.chrome || { runtime: {} };
+
+          window.chrome = window.chrome || {
+            app: { isInstalled: false },
+            runtime: {
+              OnInstalledReason: { INSTALL: "install", UPDATE: "update" },
+              OnRestartRequiredReason: { APP_UPDATE: "app_update" },
+              PlatformArch: { ARM64: "arm64", X86_64: "x86-64" },
+              PlatformOs: { MAC: "mac", WIN: "win" }
+            },
+            csi: function() {},
+            loadTimes: function() {}
+          };
+
+          try {
+            const getParameter = WebGLRenderingContext.prototype.getParameter;
+            WebGLRenderingContext.prototype.getParameter = function(parameter) {
+              if (parameter === 37445) return 'Apple';
+              if (parameter === 37446) return 'ANGLE (Apple, Apple M1, OpenGL 4.1)';
+              return getParameter.apply(this, arguments);
+            };
+          } catch(e) {}
+
           const originalQuery = navigator.permissions && navigator.permissions.query;
           if (originalQuery) {
             navigator.permissions.query = (parameters) => {
@@ -987,6 +1018,8 @@ final class ChromeBrowserSession: @unchecked Sendable {
         _ = try await connection.call("Page.enable", params: [:])
         _ = try await connection.call("Runtime.enable", params: [:])
         _ = try await connection.call("Network.enable", params: [:])
+        _ = try? await connection.call("Emulation.setAutomationOverride", params: ["enabled": false])
+        _ = try? await connection.call("Emulation.setFocusEmulationEnabled", params: ["enabled": true])
         _ = try await connection.call("Page.addScriptToEvaluateOnNewDocument", params: [
             "source": profile.stealthScript,
         ])
