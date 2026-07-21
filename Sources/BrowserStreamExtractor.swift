@@ -588,12 +588,14 @@ private struct ExtractionSettings {
         #"\.m3u8"#,
         #"master\.m3u8"#,
         #"index\.m3u8"#,
-        #"/playlist/"#,
+        #"/playlist"#,
         #"/manifest"#,
-        #"/hls/"#,
+        #"/hls"#,
         #"\.mp4"#,
-        #"/stream/"#,
+        #"/stream"#,
+        #"/live"#,
         #"/chunklist"#,
+        #"/embed"#,
     ]
     let maxCandidates = 100
 }
@@ -1184,7 +1186,7 @@ private actor CaptureCollector {
     private var requestHeadersByID: [String: [String: String]] = [:]
 
     init(patterns: [String], maxCandidates: Int) {
-        self.patterns = patterns.map(NSRegularExpression.init)
+        self.patterns = patterns.compactMap { try? NSRegularExpression(pattern: $0, options: [.caseInsensitive]) }
         self.maxCandidates = maxCandidates
     }
 
