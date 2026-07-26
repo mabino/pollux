@@ -5,20 +5,27 @@ struct PolluxApp: App {
     @StateObject private var model = PolluxAppModel()
 
     var body: some Scene {
-        WindowGroup("Pollux") {
-            MainWindowView()
+        WindowGroup(id: PolluxAppModel.mainWindowID, for: StreamRequest.self) { $request in
+            MainWindowView(request: request)
                 .environmentObject(model)
         }
         .windowResizability(.contentSize)
-        .defaultSize(width: 540, height: 195)
+        .defaultSize(width: 540, height: 210)
         .commands {
-            PolluxCommands()
+            PolluxCommands(model: model)
         }
 
         Settings {
             SettingsView()
                 .environmentObject(model)
         }
+
+        Window("Pollux Error", id: PolluxAppModel.errorWindowID) {
+            ErrorWindowView()
+                .environmentObject(model)
+        }
+        .defaultSize(width: 460, height: 220)
+        .windowResizability(.contentSize)
 
         Window("Player", id: PolluxAppModel.playerWindowID) {
             PlayerWindowView()
@@ -41,9 +48,42 @@ struct PolluxApp: App {
 }
 
 struct PolluxCommands: Commands {
+    @ObservedObject var model: PolluxAppModel
+    @ObservedObject private var recents = RecentStreamsStore.shared
     @Environment(\.openWindow) private var openWindow
 
+    init(model: PolluxAppModel) {
+        self.model = model
+    }
+
     var body: some Commands {
+        // Replace the stock "New Window" item with stream-oriented actions.
+        CommandGroup(replacing: .newItem) {
+            Button("Open New Stream…") {
+                openWindow(id: PolluxAppModel.mainWindowID, value: StreamRequest())
+            }
+            .keyboardShortcut("n", modifiers: [.command])
+
+            Menu("Open Recent") {
+                if recents.urls.isEmpty {
+                    Button("No Recent Streams") {}
+                        .disabled(true)
+                } else {
+                    ForEach(recents.urls, id: \.self) { url in
+                        Button(url) {
+                            openWindow(id: PolluxAppModel.mainWindowID, value: StreamRequest(url: url))
+                        }
+                    }
+
+                    Divider()
+
+                    Button("Clear Menu") {
+                        recents.clear()
+                    }
+                }
+            }
+        }
+
         CommandGroup(after: .newItem) {
             Button("Get Info") {
                 openWindow(id: PolluxAppModel.infoWindowID)

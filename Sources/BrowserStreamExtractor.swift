@@ -9,15 +9,22 @@ final class BrowserStreamExtractor: @unchecked Sendable {
         onProgress: (@Sendable (String, Double) -> Void)? = nil
     ) async throws -> ExtractedStream {
         onProgress?("Launching browser...", 0.10)
+        let verboseLogging = UserDefaults.standard.bool(forKey: PolluxPreferences.verboseExtractionLoggingKey)
         Task { @MainActor in
             ExtractionLogger.shared.clear()
             ExtractionLogger.shared.append("Starting stream extraction for \(sourcePageURL.absoluteString)")
+            if !verboseLogging {
+                ExtractionLogger.shared.append("Verbose CDP network logging is off. Enable it in Settings for a full request trace.")
+            }
         }
 
         let profile = BrowserProfile.random()
         let collector = CaptureCollector(patterns: settings.capturePatterns, maxCandidates: settings.maxCandidates)
         let session = try await ChromeBrowserSession.launch(profile: profile) { method, params in
             await collector.handleEvent(method: method, paramsData: params)
+            // The collector above must see every event; the per-event log lines below are the noisy
+            // part and are only emitted in verbose mode.
+            guard verboseLogging else { return }
             if method == "Network.requestWillBeSent",
                let dict = try? JSONSerialization.jsonObject(with: params) as? [String: Any],
                let req = dict["request"] as? [String: Any],
@@ -44,9 +51,11 @@ final class BrowserStreamExtractor: @unchecked Sendable {
             }
         }
 
+        // Read the retry budget per-extraction so changing it in Settings takes effect on the next run.
+        let extractionTimeout = CaptureRetryBudget.resolved()
         do {
-            let overallDeadline = Date().addingTimeInterval(settings.extractionTimeout)
-            return try await withTimeout(seconds: settings.extractionTimeout) { [self] in
+            let overallDeadline = Date().addingTimeInterval(extractionTimeout)
+            return try await withTimeout(seconds: extractionTimeout) { [self] in
                 try Task.checkCancellation()
                 onProgress?("Navigating to target page...", 0.25)
                 do {
@@ -69,7 +78,8 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     session: session,
                     collector: collector,
                     profile: profile,
-                    deadline: overallDeadline.addingTimeInterval(-25)
+                    deadline: overallDeadline.addingTimeInterval(-25),
+                    sourcePageURL: sourcePageURL
                 )
 
                 try Task.checkCancellation()
@@ -91,6 +101,9 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                 }
 
                 let cookies = try await session.cookies()
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("Captured cookies: \(cookies.map { "\($0.name)=\($0.value) (\($0.domain))" })")
+                }
                 let cachedPlaylists = await self.cachePlaylists(from: entries, session: session)
                 let candidates = self.buildCandidates(
                     from: entries,
@@ -112,12 +125,27 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     ExtractionLogger.shared.append("Validating candidates with ffprobe...")
                 }
 
-                let selection = try await self.selectBestCandidate(from: candidates, cachedPlaylists: cachedPlaylists)
+                let selection = try await self.selectBestCandidate(from: candidates, session: session, cachedPlaylists: cachedPlaylists)
 
                 try Task.checkCancellation()
                 onProgress?("Preparing playback...", 0.95)
                 Task { @MainActor in
                     ExtractionLogger.shared.append("SUCCESS: Selected stream (\(selection.kind)) at \(selection.candidate.url.absoluteString)")
+                }
+
+                // Stop collecting/logging CDP events before playback begins. The session normally
+                // stays alive for live playlist refresh, but the running player would otherwise flood
+                // the logger and freeze the UI.
+                await session.detachEventHandler()
+
+                // Opt-in aggressive cleanup: tear the browser down immediately once a stream is
+                // selected. Playback then refreshes live playlists over direct connections only.
+                let releaseBrowser = UserDefaults.standard.bool(forKey: PolluxPreferences.releaseBrowserAfterExtractionKey)
+                if releaseBrowser {
+                    await session.close()
+                    Task { @MainActor in
+                        ExtractionLogger.shared.append("Released extraction browser after selection (per settings).")
+                    }
                 }
 
                 return ExtractedStream(
@@ -128,7 +156,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     cachedPlaylists: cachedPlaylists,
                     excludedVariantURLs: selection.excludedVariantURLs,
                     notice: selection.notice,
-                    session: session
+                    session: releaseBrowser ? nil : session
                 )
             }
         } catch is CancellationError {
@@ -140,9 +168,9 @@ final class BrowserStreamExtractor: @unchecked Sendable {
         } catch is TimeoutError {
             await session.close()
             Task { @MainActor in
-                ExtractionLogger.shared.append("Extraction timed out after \(Int(self.settings.extractionTimeout)) seconds.")
+                ExtractionLogger.shared.append("Extraction timed out after \(Int(extractionTimeout)) seconds.")
             }
-            throw PolluxError.extractionTimedOut(sourcePageURL, self.settings.extractionTimeout)
+            throw PolluxError.extractionTimedOut(sourcePageURL, extractionTimeout)
         } catch {
             await session.close()
             Task { @MainActor in
@@ -159,10 +187,37 @@ final class BrowserStreamExtractor: @unchecked Sendable {
         session: ChromeBrowserSession,
         collector: CaptureCollector,
         profile: BrowserProfile,
-        deadline: Date
+        deadline: Date,
+        sourcePageURL: URL
     ) async throws {
         Task { @MainActor in
             ExtractionLogger.shared.append("Starting player interaction pipeline...")
+        }
+
+        // Some anti-bot pages serve a blank/broken document to headless automation on most loads,
+        // and only occasionally render the real player. Re-navigating gives another independent shot
+        // at a good load within the extraction window. Bounded by a cooldown so each load gets a fair
+        // chance before we retry.
+        var consecutiveBlankProbes = 0
+        var lastReload = Date()
+        var reloadCount = 0
+        let pipelineStart = Date()
+
+        // Autoplay grace: wait briefly for the stream to load on its own before any synthetic click.
+        // Chromium runs with --autoplay-policy=no-user-gesture-required, so many players auto-load
+        // their HLS. On sites that hijack the first click (popunder/redirect), clicking the content
+        // page prematurely navigates it away and blanks the player before it ever appears — so an
+        // early click actively prevents capture. Clicking still happens below if this grace lapses.
+        let graceDeadline = Date().addingTimeInterval(min(settings.autoplayGrace, max(deadline.timeIntervalSinceNow - 1, 0)))
+        while Date() < graceDeadline {
+            try Task.checkCancellation()
+            if await collector.hasHits() {
+                Task { @MainActor in
+                    ExtractionLogger.shared.append("Media candidate captured during autoplay grace period (no click needed).")
+                }
+                return
+            }
+            try? await Task.sleep(nanoseconds: 300_000_000)
         }
 
         while Date() < deadline {
@@ -204,6 +259,28 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                 }
             }
 
+            // Blank-page recovery: if the document loaded but rendered no player/content, the site
+            // likely served the anti-bot blank page. Re-navigate to try for a good load. A cooldown
+            // ensures the fresh load has time to settle before we judge it blank again.
+            if !jsMainThreadBlocked, await session.pageLooksBlank() {
+                consecutiveBlankProbes += 1
+                let cooldownElapsed = Date().timeIntervalSince(lastReload) > settings.blankPageReloadCooldown
+                if consecutiveBlankProbes >= 2, cooldownElapsed, deadline.timeIntervalSinceNow > settings.blankPageReloadCooldown {
+                    reloadCount += 1
+                    let attempt = reloadCount
+                    Task { @MainActor in
+                        ExtractionLogger.shared.append("Page looks blank (likely anti-bot). Re-navigating for a fresh load (attempt \(attempt))...")
+                    }
+                    try? await session.navigate(to: sourcePageURL, timeout: min(settings.browserTimeout, 8))
+                    lastReload = Date()
+                    consecutiveBlankProbes = 0
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    continue
+                }
+            } else {
+                consecutiveBlankProbes = 0
+            }
+
             // Step 1: Check for Cloudflare Turnstile challenge (skip if JS thread is blocked)
             if !jsMainThreadBlocked {
                 try? await session.bypassTurnstile(
@@ -219,13 +296,20 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                 return
             }
 
-            // Step 2: Poll for iframe and navigate into iframe if present (skip if JS blocked)
-            if !jsMainThreadBlocked {
+            // Step 2: As a FALLBACK, navigate the top tab into the largest iframe. This is deferred:
+            // Chromium runs with site-per-process disabled, so sub-frame network traffic is already
+            // captured in place. Many embeds build their real player as a nested iframe from tokens
+            // the parent page injects (csrf/sec_hash/pid); navigating the top tab directly into the
+            // embed discards that parent context and breaks player creation. So we let in-place clicks
+            // start the player first, and only navigate into the iframe if nothing was captured after
+            // a grace window.
+            if !jsMainThreadBlocked,
+               Date().timeIntervalSince(pipelineStart) >= settings.iframeNavigationDelay {
                 if let iframeSource = await session.pollForIframeSource(timeout: 2.0),
                    let iframeURL = safeURL(from: iframeSource) {
                     if iframeURL != session.currentURL {
                         Task { @MainActor in
-                            ExtractionLogger.shared.append("Discovered player iframe: \(iframeURL.absoluteString). Navigating browser into iframe...")
+                            ExtractionLogger.shared.append("No stream captured in place; navigating into player iframe: \(iframeURL.absoluteString)")
                         }
                         try? await session.navigate(to: iframeURL, referrer: session.currentURL?.absoluteString, timeout: 5)
                     }
@@ -436,6 +520,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
 
     private func selectBestCandidate(
         from candidates: [StreamCandidate],
+        session: ChromeBrowserSession,
         cachedPlaylists: [String: String]
     ) async throws -> CandidateSelection {
         let prober = try FFprobeService()
@@ -444,7 +529,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
             for candidate in candidates {
                 group.addTask {
                     do {
-                        let result = try await probeCandidate(candidate, with: prober, cachedPlaylists: cachedPlaylists)
+                        let result = try await probeCandidate(candidate, with: prober, session: session, cachedPlaylists: cachedPlaylists)
                         return .success(candidate, result)
                     } catch {
                         return .failure(candidate, error.localizedDescription)
@@ -545,6 +630,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
 private func probeCandidate(
     _ candidate: StreamCandidate,
     with prober: FFprobeService,
+    session: ChromeBrowserSession,
     cachedPlaylists: [String: String]
 ) async throws -> ProbeResult {
     guard candidate.kind == .hls else {
@@ -552,7 +638,7 @@ private func probeCandidate(
     }
 
     do {
-        return try await probeHLSCandidateThroughProxy(candidate, with: prober, cachedPlaylists: cachedPlaylists)
+        return try await probeHLSCandidateThroughProxy(candidate, with: prober, session: session, cachedPlaylists: cachedPlaylists)
     } catch {
         return try await prober.probe(candidate: candidate)
     }
@@ -561,6 +647,7 @@ private func probeCandidate(
 private func probeHLSCandidateThroughProxy(
     _ candidate: StreamCandidate,
     with prober: FFprobeService,
+    session: ChromeBrowserSession,
     cachedPlaylists: [String: String]
 ) async throws -> ProbeResult {
     let extracted = ExtractedStream(
@@ -570,9 +657,12 @@ private func probeHLSCandidateThroughProxy(
         kind: candidate.kind,
         cachedPlaylists: cachedPlaylists,
         excludedVariantURLs: [],
-        notice: nil
+        notice: nil,
+        session: session
     )
-    let proxy = try StreamProxyServer(stream: extracted)
+    // Borrow the shared browser session for validation only. Stopping this proxy must NOT close the
+    // session — the playback proxy still needs it alive to refresh the live playlist.
+    let proxy = try StreamProxyServer(stream: extracted, ownsSession: false)
 
     do {
         try await proxy.start()
@@ -610,9 +700,11 @@ private func bestMasterPlaylistCandidate(
 
 private struct ExtractionSettings {
     let browserTimeout: TimeInterval = 30
+    let autoplayGrace: TimeInterval = 6
+    let iframeNavigationDelay: TimeInterval = 14
+    let blankPageReloadCooldown: TimeInterval = 6
     let graceAfterActions: TimeInterval = 15
     let collectionWindow: TimeInterval = 10
-    let extractionTimeout: TimeInterval = 60
     let playlistFetchTimeout: TimeInterval = 6
     let maxCachedPlaylists = 12
     let navigateIframeTimeout: TimeInterval = 10
@@ -691,6 +783,109 @@ struct BrowserProfile {
               }
               return originalQuery.call(navigator.permissions, parameters);
             };
+          }
+        })();
+        """
+    }
+
+    /// A stronger stealth bundle used only on the quiet-CDP path. Beyond the baseline patches it fixes
+    /// the headless fingerprints anti-bot scripts key on: empty `navigator.plugins`/`mimeTypes`, zeroed
+    /// `outerWidth`/`outerHeight`, missing `navigator.connection`, WebGL2, and — importantly — makes the
+    /// patched functions report native `toString()` so the overrides themselves can't be detected.
+    var hardenedStealthScript: String {
+        """
+        (() => {
+          const nativeToString = Function.prototype.toString;
+          const faux = new WeakSet();
+          const asNative = (fn) => { try { faux.add(fn); } catch (e) {} return fn; };
+          const toStringProxy = function toString() {
+            if (faux.has(this)) return 'function ' + (this.name || '') + '() { [native code] }';
+            return nativeToString.call(this);
+          };
+          faux.add(toStringProxy);
+          try { Function.prototype.toString = toStringProxy; } catch (e) {}
+
+          const patch = (target, key, getter) => {
+            try {
+              Object.defineProperty(target, key, { get: asNative(getter), configurable: true });
+            } catch (e) {}
+          };
+
+          patch(navigator, 'webdriver', () => false);
+          patch(navigator, 'hardwareConcurrency', () => 8);
+          patch(navigator, 'deviceMemory', () => 8);
+          patch(navigator, 'platform', () => '\(platform)');
+          patch(navigator, 'languages', () => ['en-US', 'en']);
+          patch(navigator, 'maxTouchPoints', () => 0);
+
+          // Real desktop Chrome exposes these; headless zeroes/omits them.
+          try {
+            patch(window, 'outerWidth', () => \(windowWidth));
+            patch(window, 'outerHeight', () => \(windowHeight));
+          } catch (e) {}
+          try {
+            patch(navigator, 'connection', () => ({
+              effectiveType: '4g', rtt: 50, downlink: 10, saveData: false
+            }));
+          } catch (e) {}
+
+          // A non-empty PluginArray/MimeTypeArray — the single most common headless tell.
+          try {
+            const makePlugin = (name, filename, desc) => {
+              const p = Object.create(Plugin.prototype);
+              Object.defineProperties(p, {
+                name: { value: name }, filename: { value: filename },
+                description: { value: desc }, length: { value: 1 }
+              });
+              return p;
+            };
+            const plugins = [
+              makePlugin('PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'),
+              makePlugin('Chrome PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'),
+              makePlugin('Chromium PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'),
+            ];
+            const arr = Object.create(PluginArray.prototype);
+            plugins.forEach((p, i) => { arr[i] = p; });
+            Object.defineProperty(arr, 'length', { value: plugins.length });
+            patch(navigator, 'plugins', () => arr);
+            const mimeArr = Object.create(MimeTypeArray.prototype);
+            Object.defineProperty(mimeArr, 'length', { value: 1 });
+            patch(navigator, 'mimeTypes', () => mimeArr);
+          } catch (e) {}
+
+          window.chrome = window.chrome || {
+            app: { isInstalled: false },
+            runtime: {
+              OnInstalledReason: { INSTALL: "install", UPDATE: "update" },
+              OnRestartRequiredReason: { APP_UPDATE: "app_update" },
+              PlatformArch: { ARM64: "arm64", X86_64: "x86-64" },
+              PlatformOs: { MAC: "mac", WIN: "win" }
+            },
+            csi: asNative(function () {}),
+            loadTimes: asNative(function () {})
+          };
+
+          const spoofWebGL = (proto) => {
+            try {
+              const getParameter = proto.prototype.getParameter;
+              proto.prototype.getParameter = asNative(function (parameter) {
+                if (parameter === 37445) return 'Apple';
+                if (parameter === 37446) return 'ANGLE (Apple, Apple M1, OpenGL 4.1)';
+                return getParameter.apply(this, arguments);
+              });
+            } catch (e) {}
+          };
+          spoofWebGL(WebGLRenderingContext);
+          if (typeof WebGL2RenderingContext !== 'undefined') spoofWebGL(WebGL2RenderingContext);
+
+          const originalQuery = navigator.permissions && navigator.permissions.query;
+          if (originalQuery) {
+            navigator.permissions.query = asNative((parameters) => {
+              if (parameters && parameters.name === 'notifications') {
+                return Promise.resolve({ state: Notification.permission });
+              }
+              return originalQuery.call(navigator.permissions, parameters);
+            });
           }
         })();
         """
@@ -777,8 +972,10 @@ final class ChromiumProcessTracker: @unchecked Sendable {
         if let tracked {
             if tracked.process.isRunning {
                 tracked.process.terminate()
-                tracked.process.waitUntilExit()
             }
+            // Hard-kill the whole Chromium process tree (main + renderer/gpu/network helpers), which a
+            // plain terminate() on the parent does not reliably reap, then delete the profile.
+            Self.killProcessTree(userDataDirectory: tracked.userDataDirectory)
             try? FileManager.default.removeItem(at: tracked.userDataDirectory)
         }
     }
@@ -797,12 +994,45 @@ final class ChromiumProcessTracker: @unchecked Sendable {
             if tracked.process.isRunning {
                 tracked.process.terminate()
             }
+            Self.killProcessTree(userDataDirectory: tracked.userDataDirectory)
             try? FileManager.default.removeItem(at: tracked.userDataDirectory)
+        }
+    }
+
+    /// Removes leftover extraction browsers from previous runs (e.g. after a crash or force-quit).
+    /// Safe to call at launch — any `pollux-chrome-*` profile in the temp dir is stale because we have
+    /// not started a session yet.
+    func cleanupOrphans() {
+        let tempDirectory = FileManager.default.temporaryDirectory
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: tempDirectory,
+            includingPropertiesForKeys: nil
+        ) else {
+            return
+        }
+
+        for entry in entries where entry.lastPathComponent.hasPrefix("pollux-chrome-") {
+            Self.killProcessTree(userDataDirectory: entry)
+            try? FileManager.default.removeItem(at: entry)
+        }
+    }
+
+    /// Kills every process whose command line references this profile directory. The unique UUID in
+    /// the path makes the match precise, so unrelated processes are never touched.
+    private static func killProcessTree(userDataDirectory: URL) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        process.arguments = ["-9", "-f", userDataDirectory.path]
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            // pkill unavailable or nothing matched — nothing more to do.
         }
     }
 }
 
-final class ChromeBrowserSession: @unchecked Sendable {
+final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
     let id: UUID
     private static let largestIframeScript = """
     (function() {
@@ -854,11 +1084,19 @@ final class ChromeBrowserSession: @unchecked Sendable {
     private var closed = false
     private(set) var currentURL: URL?
 
-    private init(id: UUID, process: Process, userDataDirectory: URL, connection: CDPConnection) {
+    /// Anti-automation mitigation ("quiet CDP") is active for this session. Set once at launch.
+    private let mitigation: Bool
+    /// Execution context of the isolated world our probes run in when mitigation is active. Recreated
+    /// after each navigation (navigation destroys the old world). `nil` means "use the default world",
+    /// which is the behavior when mitigation is off or before the first world has been created.
+    private var isolatedContextId: Int?
+
+    private init(id: UUID, process: Process, userDataDirectory: URL, connection: CDPConnection, mitigation: Bool) {
         self.id = id
         self.process = process
         self.userDataDirectory = userDataDirectory
         self.connection = connection
+        self.mitigation = mitigation
     }
 
     static func launch(
@@ -882,26 +1120,19 @@ final class ChromeBrowserSession: @unchecked Sendable {
         process.standardError = stderrPipe
         let diagnostics = ChromeLaunchDiagnostics(stdoutPipe: stdoutPipe, stderrPipe: stderrPipe)
 
-        process.arguments = [
-            "--remote-debugging-port=0",
-            "--user-data-dir=\(userDataDirectory.path)",
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--headless=new",
-            "--disable-dev-shm-usage",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-infobars",
-            "--use-mock-keychain",
-            "--disable-background-timer-throttling",
-            "--disable-backgrounding-occluded-windows",
-            "--disable-renderer-backgrounding",
-            "--webrtc-ip-handling-policy=disable_non_proxied_udp",
-            "--autoplay-policy=no-user-gesture-required",
-            "--incognito",
-            "--window-size=\(profile.windowWidth),\(profile.windowHeight)",
-            "--user-agent=\(profile.userAgent)",
-            "about:blank",
-        ]
+        // Headful mode (opt-in): launch a real, visible window instead of headless so sites that
+        // detect and block headless Chromium still render their player.
+        let headful = UserDefaults.standard.bool(forKey: PolluxPreferences.headfulExtractionKey)
+        // Anti-automation mitigation (opt-in "quiet CDP" path): active at the Standard level. The
+        // Maximum level never reaches CDP launch — it is routed to the passive net-log capture path.
+        let mitigation = AntiAutomationLevel.resolved() == .standard
+
+        process.arguments = launchArguments(
+            profile: profile,
+            userDataDirectory: userDataDirectory,
+            headful: headful,
+            mitigation: mitigation
+        )
 
         do {
             try process.run()
@@ -926,7 +1157,8 @@ final class ChromeBrowserSession: @unchecked Sendable {
                 id: id,
                 process: process,
                 userDataDirectory: userDataDirectory,
-                connection: connection
+                connection: connection,
+                mitigation: mitigation
             )
             try await session.configure(profile: profile)
             diagnostics.stop()
@@ -941,12 +1173,55 @@ final class ChromeBrowserSession: @unchecked Sendable {
         }
     }
 
+    /// Builds the Chromium command-line arguments. Extracted for unit testing so the mitigation and
+    /// headful toggles can be verified without launching a real browser.
+    static func launchArguments(
+        profile: BrowserProfile,
+        userDataDirectory: URL,
+        headful: Bool,
+        mitigation: Bool
+    ) -> [String] {
+        var arguments = [
+            "--remote-debugging-port=0",
+            "--user-data-dir=\(userDataDirectory.path)",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-infobars",
+            "--use-mock-keychain",
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+            "--autoplay-policy=no-user-gesture-required",
+            "--incognito",
+            "--disable-features=IsolateOrigins,site-per-process",
+            "--window-size=\(profile.windowWidth),\(profile.windowHeight)",
+            "--user-agent=\(profile.userAgent)",
+        ]
+        // `--disable-web-security` is itself a fingerprint (CORS/SharedArrayBuffer behavior differs from
+        // a real browser). In the quiet-CDP path we drop it and instead fetch cross-origin playlists
+        // from an isolated world granted universal access, which keeps capture working without the tell.
+        if !mitigation {
+            arguments.append("--disable-web-security")
+        }
+        if !headful {
+            arguments.append("--headless=new")
+        }
+        arguments.append("about:blank")
+        return arguments
+    }
+
     func navigate(to url: URL, referrer: String? = nil, timeout: TimeInterval) async throws {
         var params: [String: Any] = ["url": url.absoluteString]
         if let referrer {
             params["referrer"] = referrer
         }
         currentURL = url
+        // Navigation destroys any isolated world we created for the previous document; fall back to the
+        // default world for the readyState probe until we can create a fresh one below.
+        isolatedContextId = nil
         _ = try? await connection.call("Page.navigate", params: params, timeout: 10.0)
         do {
             try await waitForDocumentReady(timeout: min(timeout, 8.0))
@@ -954,6 +1229,36 @@ final class ChromeBrowserSession: @unchecked Sendable {
             Task { @MainActor in
                 ExtractionLogger.shared.append("Page ready state check notice: continuing pipeline to inspect player & network candidates.")
             }
+        }
+        await refreshIsolatedWorld()
+    }
+
+    /// Creates a fresh isolated world in the main frame and remembers its execution context so that
+    /// subsequent `Runtime.evaluate` calls run there instead of the page's main world. No-op unless
+    /// anti-automation mitigation is active. The world is granted universal access so our cross-origin
+    /// playlist fetches keep working without `--disable-web-security`.
+    private func refreshIsolatedWorld() async {
+        guard mitigation else { return }
+        do {
+            let treePayload = try await connection.call("Page.getFrameTree", params: [:])
+            let tree = try jsonDictionary(from: treePayload)
+            guard let frameTree = tree["frameTree"] as? [String: Any],
+                  let frame = frameTree["frame"] as? [String: Any],
+                  let frameId = frame["id"] as? String else {
+                isolatedContextId = nil
+                return
+            }
+            let worldPayload = try await connection.call("Page.createIsolatedWorld", params: [
+                "frameId": frameId,
+                "worldName": "pollux_probe",
+                "grantUniveralAccess": true,
+            ])
+            let world = try jsonDictionary(from: worldPayload)
+            isolatedContextId = world["executionContextId"] as? Int
+        } catch {
+            // If world creation fails we fall back to the default context; probing still works, just
+            // without the isolation benefit.
+            isolatedContextId = nil
         }
     }
 
@@ -1021,6 +1326,7 @@ final class ChromeBrowserSession: @unchecked Sendable {
             else {
                 return
             }
+            currentURL = iframeURL
             _ = try await connection.call("Page.navigate", params: ["url": iframeURL.absoluteString])
             try await waitForDocumentReady(timeout: min(3, max(deadline.timeIntervalSinceNow, 1)))
         }
@@ -1064,7 +1370,14 @@ final class ChromeBrowserSession: @unchecked Sendable {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(new Error("Pollux playlist fetch timed out")), \(Int(timeout * 1000)));
           try {
-            const response = await fetch(\(urlLiteral), { signal: controller.signal });
+            const response = await fetch(\(urlLiteral), {
+              signal: controller.signal,
+              cache: 'no-store',
+              headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache'
+              }
+            });
             clearTimeout(timeoutId);
             return await response.text();
           } catch (error) {
@@ -1107,6 +1420,30 @@ final class ChromeBrowserSession: @unchecked Sendable {
             throw PolluxError.unexpected("Browser binary fetch returned undecodable data.")
         }
         return data
+    }
+
+    /// Silences CDP event delivery (network/console events). Extraction attaches a handler that logs
+    /// and collects every network event; once we hand the live session to the playback proxy we must
+    /// detach it, otherwise the running player's ongoing network traffic (plus our own proxy fetches)
+    /// floods the collector and the @MainActor logger and hangs the app.
+    func detachEventHandler() async {
+        await connection.setEventHandler { _, _ in }
+    }
+
+    /// True when the document has finished loading but has no player, no iframe, and no visible text —
+    /// the "blank/broken" state anti-bot pages serve to headless automation. Used to decide whether a
+    /// fresh re-navigation is worth attempting.
+    func pageLooksBlank() async -> Bool {
+        let script = """
+        (() => {
+          if (document.readyState !== 'complete') return false;
+          if (document.querySelector('video') || document.querySelector('iframe')) return false;
+          const title = (document.title || '').trim();
+          const bodyText = (document.body && document.body.innerText || '').trim();
+          return title.length === 0 && bodyText.length === 0;
+        })()
+        """
+        return (try? await evaluateBool(script)) ?? false
     }
 
     func close() async {
@@ -1158,13 +1495,20 @@ final class ChromeBrowserSession: @unchecked Sendable {
 
     private func configure(profile: BrowserProfile) async throws {
         _ = try await connection.call("Page.enable", params: [:])
-        _ = try await connection.call("Runtime.enable", params: [:])
+        // `Runtime.enable` is the loudest CDP tell — it lets a page observe the DevTools console
+        // serializer and conclude it is being automated. In the quiet-CDP path we never enable it;
+        // `Runtime.evaluate` still works as a command without it, and we run probes in an isolated
+        // world so they leave no trace in the page's main world. Cost: console-based m3u8 sniffing is
+        // unavailable (Network-domain capture is the primary path anyway).
+        if !mitigation {
+            _ = try await connection.call("Runtime.enable", params: [:])
+        }
         _ = try await connection.call("Network.enable", params: [:])
         _ = try await connection.call("DOM.enable", params: [:])
         _ = try? await connection.call("Emulation.setAutomationOverride", params: ["enabled": false])
         _ = try? await connection.call("Emulation.setFocusEmulationEnabled", params: ["enabled": true])
         _ = try await connection.call("Page.addScriptToEvaluateOnNewDocument", params: [
-            "source": profile.stealthScript,
+            "source": mitigation ? profile.hardenedStealthScript : profile.stealthScript,
         ])
         _ = try await connection.call("Emulation.setUserAgentOverride", params: [
             "userAgent": profile.userAgent,
@@ -1245,10 +1589,17 @@ final class ChromeBrowserSession: @unchecked Sendable {
     }
 
     private func evaluate(_ script: String) async throws -> Any? {
-        let payload = try await connection.call("Runtime.evaluate", params: [
+        var params: [String: Any] = [
             "expression": script,
             "returnByValue": true,
-        ], timeout: 8.0)
+            "awaitPromise": true,
+        ]
+        // When mitigation is active, run in the isolated world so nothing we evaluate is visible to the
+        // page's main-world code. `contextId` is omitted (default world) when no isolated world exists.
+        if let isolatedContextId {
+            params["contextId"] = isolatedContextId
+        }
+        let payload = try await connection.call("Runtime.evaluate", params: params, timeout: 8.0)
         let result = try jsonDictionary(from: payload)
 
         if let exception = result["exceptionDetails"] as? [String: Any],
@@ -1340,17 +1691,20 @@ private actor CaptureCollector {
     }
 
     func hasHits() -> Bool {
-        !candidates.isEmpty
+        candidates.values.contains { candidate in
+            let path = getPathAndExtension(from: candidate.rawURL).path.lowercased()
+            return path.contains(".m3u8") || path.contains(".mp4") || path.contains(".ts") || candidate.score >= 50
+        }
     }
 
     func waitForEntries(graceAfterActions: TimeInterval, collectionWindow: TimeInterval) async -> [CapturedEntry] {
-        if !candidates.isEmpty {
+        if hasHits() {
             return await collectMore(for: collectionWindow)
         }
 
         let graceDeadline = Date().addingTimeInterval(graceAfterActions)
         while Date() < graceDeadline {
-            if !candidates.isEmpty {
+            if hasHits() {
                 return await collectMore(for: collectionWindow)
             }
             do {

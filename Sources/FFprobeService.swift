@@ -72,10 +72,15 @@ final class FFprobeService: @unchecked Sendable {
             process.standardError = stderr
 
             try process.run()
-            process.waitUntilExit()
 
-            let stdoutData = stdout.fileHandleForReading.readDataToEndOfFile()
-            let stderrData = stderr.fileHandleForReading.readDataToEndOfFile()
+            let stdoutHandle = stdout.fileHandleForReading
+            let stderrHandle = stderr.fileHandleForReading
+
+            // Read concurrently to avoid pipe deadlock
+            let stdoutData = await Task.detached { stdoutHandle.readDataToEndOfFile() }.value
+            let stderrData = await Task.detached { stderrHandle.readDataToEndOfFile() }.value
+
+            process.waitUntilExit()
 
             guard process.terminationStatus == 0 else {
                 let reason = String(decoding: stderrData, as: UTF8.self)

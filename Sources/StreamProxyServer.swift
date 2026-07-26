@@ -3,7 +3,12 @@ import Network
 
 actor StreamProxyServer {
     private let stream: ExtractedStream
+    private let ownsSession: Bool
     private let listener: NWListener
+    /// Host embedded in the proxied URLs handed to the player. The Mac's LAN IP when available, so
+    /// AirPlay receivers (which fetch HLS themselves and can't reach 127.0.0.1) can load the stream;
+    /// falls back to loopback when offline.
+    private let advertisedHost: String
     private let queue = DispatchQueue(label: "io.github.mabino.pollux.proxy")
     private let session: URLSession
 
@@ -11,11 +16,17 @@ actor StreamProxyServer {
     private var connections: [UUID: NWConnection] = [:]
     private var started = false
 
-    init(stream: ExtractedStream) throws {
+    /// - Parameter ownsSession: Whether stopping this proxy should also close the shared Chrome
+    ///   browser session. The playback proxy owns the session (closing it tears down Chrome when
+    ///   playback ends). Short-lived proxies that merely borrow the session for validation must set
+    ///   this to `false`; otherwise they kill the session that live playlist refresh depends on.
+    init(stream: ExtractedStream, ownsSession: Bool = true) throws {
         self.stream = stream
+        self.ownsSession = ownsSession
+        self.advertisedHost = primaryIPv4Address() ?? "127.0.0.1"
 
+        // Bind on all interfaces (not just loopback) so an Apple TV on the LAN can reach the proxy.
         let parameters = NWParameters.tcp
-        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         parameters.allowLocalEndpointReuse = true
         self.listener = try NWListener(using: parameters, on: .any)
 
@@ -67,9 +78,11 @@ actor StreamProxyServer {
         connections.removeAll()
         existingConnections.forEach { $0.cancel() }
         session.invalidateAndCancel()
-        let browserSession = stream.session
-        Task {
-            await browserSession?.close()
+        if ownsSession {
+            let browserSession = stream.session
+            Task {
+                await browserSession?.close()
+            }
         }
 
         if let readyContinuation {
@@ -215,70 +228,40 @@ actor StreamProxyServer {
         let isTargetURLPlaylist = targetURL.pathExtension.lowercased() == "m3u8" || request.url.path.lowercased().hasSuffix(".m3u8")
 
         if isTargetURLPlaylist {
+            // Master playlists (and explicitly finished VOD playlists) are static indexes, so
+            // it is safe to pin them to the browser-extraction cache. Live media playlists are
+            // sliding windows: they MUST be refetched on every reload so the player keeps
+            // discovering new segments. Serving a live media playlist from cache — or letting the
+            // client cache it — freezes playback once the initial window is consumed.
             if let cachedPlaylist = stream.cachedPlaylists[targetURL.absoluteString], shouldServeCachedPlaylist(cachedPlaylist) {
-                let filtered = filterExcludedVariantsFromMasterPlaylist(
-                    Data(cachedPlaylist.utf8),
+                return try playlistResponse(
+                    from: Data(cachedPlaylist.utf8),
                     playlistURL: targetURL,
-                    excludedVariantURLs: stream.excludedVariantURLs
+                    localPort: localPort,
+                    method: request.method
                 )
-                let rewritten = try rewritePlaylistData(filtered, playlistURL: targetURL) {
-                    ProxyURLBuilder.proxyURL(port: localPort, targetURL: $0)
-                }
-                let proxyResponse = ProxyResponse(
-                    statusCode: 200,
-                    headers: [
-                        "Content-Type": StreamKind.hls.mimeType,
-                        "Content-Length": "\(rewritten.count)",
-                    ],
-                    body: request.method == "HEAD" ? Data() : rewritten
-                )
-                return proxyResponse.encoded()
             }
 
             if let browserSession = stream.session {
-                if let fetchedText = try? await browserSession.fetchTextResource(at: targetURL, timeout: 6),
-                   !fetchedText.isEmpty,
-                   !fetchedText.hasPrefix("ERROR:")
-                {
-                    let filtered = filterExcludedVariantsFromMasterPlaylist(
-                        Data(fetchedText.utf8),
-                        playlistURL: targetURL,
-                        excludedVariantURLs: stream.excludedVariantURLs
-                    )
-                    let rewritten = try rewritePlaylistData(filtered, playlistURL: targetURL) {
-                        ProxyURLBuilder.proxyURL(port: localPort, targetURL: $0)
+                do {
+                    let fetchedText = try await browserSession.fetchTextResource(at: targetURL, timeout: 6)
+                    print("[Proxy] Live playlist fetchTextResource returned length=\(fetchedText.count) prefix=\(String(fetchedText.prefix(40)))")
+                    if !fetchedText.isEmpty && !fetchedText.hasPrefix("ERROR:") {
+                        return try playlistResponse(
+                            from: Data(fetchedText.utf8),
+                            playlistURL: targetURL,
+                            localPort: localPort,
+                            method: request.method
+                        )
                     }
-                    let proxyResponse = ProxyResponse(
-                        statusCode: 200,
-                        headers: [
-                            "Content-Type": StreamKind.hls.mimeType,
-                            "Content-Length": "\(rewritten.count)",
-                        ],
-                        body: request.method == "HEAD" ? Data() : rewritten
-                    )
-                    return proxyResponse.encoded()
+                } catch {
+                    print("[Proxy] Live playlist fetchTextResource threw error: \(error.localizedDescription)")
                 }
             }
 
-            if let cachedPlaylist = stream.cachedPlaylists[targetURL.absoluteString], !cachedPlaylist.isEmpty {
-                let filtered = filterExcludedVariantsFromMasterPlaylist(
-                    Data(cachedPlaylist.utf8),
-                    playlistURL: targetURL,
-                    excludedVariantURLs: stream.excludedVariantURLs
-                )
-                let rewritten = try rewritePlaylistData(filtered, playlistURL: targetURL) {
-                    ProxyURLBuilder.proxyURL(port: localPort, targetURL: $0)
-                }
-                let proxyResponse = ProxyResponse(
-                    statusCode: 200,
-                    headers: [
-                        "Content-Type": StreamKind.hls.mimeType,
-                        "Content-Length": "\(rewritten.count)",
-                    ],
-                    body: request.method == "HEAD" ? Data() : rewritten
-                )
-                return proxyResponse.encoded()
-            }
+            // The browser session could not deliver a fresh playlist. Fall through to a direct
+            // URLSession fetch below (with the captured stream headers) so the live window is still
+            // refreshed. The stale cached copy is only used as a last resort, further down.
         }
 
         var upstreamRequest = URLRequest(url: targetURL)
@@ -286,60 +269,147 @@ actor StreamProxyServer {
         applyCapturedHeaders(to: &upstreamRequest, downstreamHeaders: request.headers)
 
         print("[Proxy] Requesting upstream method=\(request.method) url=\(targetURL) headers=\(upstreamRequest.allHTTPHeaderFields ?? [:])")
-        let (responseBody, urlResponse) = try await session.data(for: upstreamRequest)
-        guard let httpResponse = urlResponse as? HTTPURLResponse else {
+        
+        var responseBodyData: Data = Data()
+        var httpResponse: HTTPURLResponse?
+        
+        do {
+            let (body, urlResponse) = try await session.data(for: upstreamRequest)
+            if let httpResp = urlResponse as? HTTPURLResponse {
+                responseBodyData = body
+                httpResponse = httpResp
+            }
+        } catch {
+            print("[Proxy] URLSession request failed with error: \(error.localizedDescription)")
+        }
+        
+        let statusCode = httpResponse?.statusCode ?? 500
+        print("[Proxy] Upstream status=\(statusCode) url=\(targetURL)")
+
+        let contentType = httpResponse?.allHeaderFields["Content-Type"] as? String ?? ""
+        let isPlaylist =
+            targetURL.pathExtension.lowercased() == "m3u8" ||
+            request.url.path.lowercased().hasSuffix(".m3u8") ||
+            contentType.lowercased().contains("mpegurl")
+
+        // Fall back to browser session if URLSession failed (e.g. 403 Forbidden, 401 Unauthorized, or complete failure)
+        if (statusCode != 200 && statusCode != 206) || responseBodyData.isEmpty, let browserSession = stream.session {
+            if isPlaylist {
+                if let browserFetchedText = try? await browserSession.fetchTextResource(at: targetURL, timeout: 6),
+                   !browserFetchedText.isEmpty,
+                   !browserFetchedText.hasPrefix("ERROR:")
+                {
+                    print("[Proxy] Upstream failed with \(statusCode) via URLSession. Successfully fetched playlist text via browser.")
+                    responseBodyData = Data(browserFetchedText.utf8)
+                    httpResponse = HTTPURLResponse(
+                        url: targetURL,
+                        statusCode: 200,
+                        httpVersion: "HTTP/1.1",
+                        headerFields: [
+                            "Content-Type": "application/x-mpegurl",
+                            "Content-Length": "\(responseBodyData.count)"
+                        ]
+                    )
+                }
+            } else {
+                if let browserFetchedBody = try? await browserSession.fetchBinaryResource(at: targetURL, timeout: 6) {
+                    print("[Proxy] Upstream failed with \(statusCode) via URLSession. Successfully fetched binary resource via browser.")
+                    responseBodyData = browserFetchedBody
+                    httpResponse = HTTPURLResponse(
+                        url: targetURL,
+                        statusCode: 200,
+                        httpVersion: "HTTP/1.1",
+                        headerFields: [
+                            "Content-Type": proxyContentType(for: request.url),
+                            "Content-Length": "\(responseBodyData.count)"
+                        ]
+                    )
+                }
+            }
+        }
+
+        // Last resort for a live playlist whose live refresh failed on every path: fall back to
+        // the copy captured during extraction so playback degrades gracefully instead of dying.
+        // This is critical because these CDNs routinely reject a direct URLSession fetch with 403
+        // (only the authenticated browser session is allowed). We must never surface that 403 — or
+        // an empty/error body — to the player as if it were a real playlist. The no-cache headers on
+        // the cached response keep the player polling, so it can recover as soon as a later reload
+        // succeeds.
+        let finalStatus = httpResponse?.statusCode ?? 0
+        let cachedCopy = stream.cachedPlaylists[targetURL.absoluteString]
+        if shouldServeCachedManifestOnUpstreamFailure(
+               isPlaylist: isPlaylist,
+               upstreamStatus: finalStatus,
+               bodyIsEmpty: responseBodyData.isEmpty,
+               hasCachedCopy: !(cachedCopy?.isEmpty ?? true)
+           ),
+           let cachedPlaylist = cachedCopy {
+            print("[Proxy] Live playlist refresh failed (status=\(finalStatus)); serving cached copy as last resort.")
+            return try playlistResponse(
+                from: Data(cachedPlaylist.utf8),
+                playlistURL: targetURL,
+                localPort: localPort,
+                method: request.method
+            )
+        }
+
+        guard let finalResponse = httpResponse else {
             throw PolluxError.proxyStartFailed("The upstream stream server returned an invalid response.")
         }
-        print("[Proxy] Upstream status=\(httpResponse.statusCode) url=\(targetURL)")
-
-        let upstreamHeaders = filteredHeaders(from: httpResponse, bodyRewritten: false)
-        let responseContentType = upstreamHeaders["Content-Type"]?.lowercased() ?? ""
-        let isPlaylist =
-            responseContentType.contains("mpegurl") ||
-            targetURL.pathExtension.lowercased() == "m3u8" ||
-            request.url.path.lowercased().hasSuffix(".m3u8")
 
         if isPlaylist {
-            let rewritten = try rewritePlaylistData(responseBody, playlistURL: targetURL) {
-                ProxyURLBuilder.proxyURL(port: localPort, targetURL: $0)
-            }
-            var headers = filteredHeaders(from: httpResponse, bodyRewritten: true)
-            headers["Content-Type"] = StreamKind.hls.mimeType
-            headers["Content-Length"] = "\(rewritten.count)"
-            let proxyResponse = ProxyResponse(
-                statusCode: httpResponse.statusCode,
-                headers: headers,
-                body: request.method == "HEAD" ? Data() : rewritten
+            return try playlistResponse(
+                from: responseBodyData,
+                playlistURL: targetURL,
+                localPort: localPort,
+                method: request.method,
+                statusCode: finalResponse.statusCode,
+                baseHeaders: filteredHeaders(from: finalResponse, bodyRewritten: true)
             )
-            return proxyResponse.encoded()
         }
 
-        if let browserSession = stream.session,
-           let browserFetchedBody = try? await browserSession.fetchBinaryResource(at: targetURL, timeout: 6)
-        {
-            let rewrittenBody = stripPNGHeaderIfNeeded(browserFetchedBody)
-            let proxyResponse = ProxyResponse(
-                statusCode: 200,
-                headers: [
-                    "Content-Type": proxyContentType(for: targetURL),
-                    "Content-Length": "\(rewrittenBody.count)",
-                ],
-                body: request.method == "HEAD" ? Data() : rewrittenBody
-            )
-            return proxyResponse.encoded()
-        }
-
-        let rewrittenBody = stripPNGHeaderIfNeeded(responseBody)
-        var headers = filteredHeaders(from: httpResponse, bodyRewritten: rewrittenBody.count != responseBody.count)
-        if headers["Content-Type"] == nil {
-            headers["Content-Type"] = "application/octet-stream"
+        let rewrittenBody = stripPNGHeaderIfNeeded(responseBodyData)
+        var headers = filteredHeaders(from: finalResponse, bodyRewritten: rewrittenBody.count != responseBodyData.count)
+        if headers["Content-Type"] == nil || headers["Content-Type"]?.lowercased().contains("octet-stream") == true || headers["Content-Type"]?.lowercased().contains("image") == true {
+            headers["Content-Type"] = proxyContentType(for: request.url)
         }
         headers["Content-Length"] = "\(rewrittenBody.count)"
 
         let proxyResponse = ProxyResponse(
-            statusCode: httpResponse.statusCode,
+            statusCode: finalResponse.statusCode,
             headers: headers,
             body: request.method == "HEAD" ? Data() : rewrittenBody
+        )
+        return proxyResponse.encoded()
+    }
+
+    /// Builds a proxied HLS playlist response. The playlist is filtered (excluded variants),
+    /// rewritten so every referenced URL points back through this proxy, and — critically —
+    /// tagged with aggressive no-cache headers. Without these, AVPlayer / ffplay cache the live
+    /// media playlist and stop reloading it, freezing playback once the initial window is played.
+    private func playlistResponse(
+        from data: Data,
+        playlistURL: URL,
+        localPort: UInt16,
+        method: String,
+        statusCode: Int = 200,
+        baseHeaders: [String: String] = [:]
+    ) throws -> Data {
+        let filtered = filterExcludedVariantsFromMasterPlaylist(
+            data,
+            playlistURL: playlistURL,
+            excludedVariantURLs: stream.excludedVariantURLs
+        )
+        let rewritten = try rewritePlaylistData(filtered, playlistURL: playlistURL) {
+            ProxyURLBuilder.proxyURL(port: localPort, targetURL: $0, host: advertisedHost)
+        }
+
+        let headers = hlsManifestResponseHeaders(contentLength: rewritten.count, baseHeaders: baseHeaders)
+
+        let proxyResponse = ProxyResponse(
+            statusCode: statusCode,
+            headers: headers,
+            body: method == "HEAD" ? Data() : rewritten
         )
         return proxyResponse.encoded()
     }
@@ -373,7 +443,7 @@ actor StreamProxyServer {
         guard let localPort = listener.port?.rawValue else {
             throw PolluxError.proxyStartFailed("The playback proxy does not have a bound port yet.")
         }
-        return ProxyURLBuilder.proxyURL(port: localPort, targetURL: targetURL)
+        return ProxyURLBuilder.proxyURL(port: localPort, targetURL: targetURL, host: advertisedHost)
     }
 
     private func removeConnection(_ identifier: UUID) {

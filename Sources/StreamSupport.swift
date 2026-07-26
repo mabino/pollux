@@ -255,6 +255,16 @@ struct StreamCandidate: Sendable {
     let score: Int
 }
 
+/// The subset of a live browser session the playback proxy depends on: authenticated resource
+/// fetches for live playlist/segment refresh, plus teardown. Abstracted behind a protocol so the
+/// proxy's session handling (notably ownership/close semantics) can be tested without launching
+/// Chrome.
+protocol BrowserSession: AnyObject, Sendable {
+    func fetchTextResource(at url: URL, timeout: TimeInterval) async throws -> String
+    func fetchBinaryResource(at url: URL, timeout: TimeInterval) async throws -> Data
+    func close() async
+}
+
 struct ExtractedStream: Sendable {
     let sourcePageURL: URL
     let streamURL: URL
@@ -263,7 +273,7 @@ struct ExtractedStream: Sendable {
     let cachedPlaylists: [String: String]
     let excludedVariantURLs: Set<String>
     let notice: String?
-    let session: ChromeBrowserSession?
+    let session: BrowserSession?
 
     init(
         sourcePageURL: URL,
@@ -273,7 +283,7 @@ struct ExtractedStream: Sendable {
         cachedPlaylists: [String: String],
         excludedVariantURLs: Set<String> = [],
         notice: String?,
-        session: ChromeBrowserSession? = nil
+        session: BrowserSession? = nil
     ) {
         self.sourcePageURL = sourcePageURL
         self.streamURL = streamURL
@@ -288,6 +298,73 @@ struct ExtractedStream: Sendable {
 
 enum PolluxPreferences {
     static let ffprobePathKey = "pollux.ffprobePath"
+    /// When enabled, the Extraction Log includes a line for every CDP network request/response and
+    /// console message. Off by default: that per-event firehose is only useful for deep debugging
+    /// and is heavy on the UI. High-level pipeline milestones and errors are always logged.
+    static let verboseExtractionLoggingKey = "pollux.verboseExtractionLogging"
+    /// Total seconds extraction is allowed to keep retrying capture before giving up. A larger budget
+    /// means more re-navigations against anti-bot pages that only occasionally render the real player.
+    static let captureRetryBudgetKey = "pollux.captureRetryBudgetSeconds"
+    /// Recently opened stream page URLs, backing the File ▸ Open Recent menu.
+    static let recentStreamsKey = "pollux.recentStreams"
+    /// Launch the extraction browser with a visible (headful) window instead of headless. Some sites
+    /// detect headless Chromium and serve a black/blocked page; a real window can bypass that.
+    static let headfulExtractionKey = "pollux.headfulExtraction"
+    /// Close the extraction browser the moment a stream is selected. Frees the Chromium instance
+    /// immediately, but live playlists then refresh via direct connections only (no browser fallback),
+    /// which some CDNs reject — leave off if live playback stalls.
+    static let releaseBrowserAfterExtractionKey = "pollux.releaseBrowserAfterExtraction"
+    /// Legacy boolean predecessor of `antiAutomationLevelKey`. Retained only so an existing "on"
+    /// setting migrates to `.standard`. New writes go to `antiAutomationLevelKey`.
+    static let antiAutomationMitigationKey = "pollux.antiAutomationMitigation"
+    /// Selects how hard Pollux works to avoid automation detection. Stores an `AntiAutomationLevel`
+    /// raw value. Off by default. `.standard` is the "quiet CDP" path (skips `Runtime.enable`, isolated
+    /// world probes, hardened stealth, no `--disable-web-security`).
+    static let antiAutomationLevelKey = "pollux.antiAutomationLevel"
+}
+
+/// Anti-detection strategy. Backed by `PolluxPreferences.antiAutomationLevelKey`.
+enum AntiAutomationLevel: Int, Sendable, CaseIterable {
+    /// Standard CDP-driven extraction (fastest, most capable, most detectable).
+    case off = 0
+    /// "Quiet CDP": skip `Runtime.enable`, isolated-world probes, hardened stealth, no
+    /// `--disable-web-security`. Defeats `Runtime.enable`-class detection.
+    case standard = 1
+
+    static func resolved(from defaults: UserDefaults = .standard) -> AntiAutomationLevel {
+        // `object(forKey:) != nil` distinguishes "set" from "unset"; `integer(forKey:)` then coerces
+        // both a stored Int (GUI @AppStorage) and a stored String (command-line `-key value`).
+        if defaults.object(forKey: PolluxPreferences.antiAutomationLevelKey) != nil,
+           let level = AntiAutomationLevel(rawValue: defaults.integer(forKey: PolluxPreferences.antiAutomationLevelKey)) {
+            return level
+        }
+        // Migrate the retired boolean: a previously-enabled toggle maps to the quiet CDP path.
+        if defaults.bool(forKey: PolluxPreferences.antiAutomationMitigationKey) {
+            return .standard
+        }
+        return .off
+    }
+}
+
+/// Resolves the user-configurable "how long to keep retrying capture" budget, with a safe default and
+/// clamping. Extraction against adversarial sites is probabilistic, so this trades wall-clock time for
+/// a higher chance of catching a good page load.
+enum CaptureRetryBudget {
+    static let minSeconds: TimeInterval = 30
+    static let maxSeconds: TimeInterval = 300
+    static let defaultSeconds: TimeInterval = 60
+
+    static func clamp(_ seconds: TimeInterval) -> TimeInterval {
+        min(maxSeconds, max(minSeconds, seconds))
+    }
+
+    static func resolved(from userDefaults: UserDefaults = .standard) -> TimeInterval {
+        // `object(forKey:)` distinguishes "unset" (use default) from an explicit 0.
+        guard let stored = userDefaults.object(forKey: PolluxPreferences.captureRetryBudgetKey) as? Double else {
+            return defaultSeconds
+        }
+        return clamp(stored)
+    }
 }
 
 func parsePageURL(_ rawValue: String) throws -> URL {
@@ -412,6 +489,37 @@ func shouldServeCachedPlaylist(_ playlist: String) -> Bool {
     return uppercased.contains("#EXT-X-STREAM-INF") || uppercased.contains("#EXT-X-ENDLIST")
 }
 
+/// Response headers for a proxied HLS manifest. The manifest is always marked non-cacheable: a live
+/// media playlist is a sliding window, so the player must re-request it on every reload to discover
+/// new segments. Without these headers AVPlayer/ffplay cache the first window and playback freezes
+/// once it is consumed.
+func hlsManifestResponseHeaders(contentLength: Int, baseHeaders: [String: String] = [:]) -> [String: String] {
+    var headers = baseHeaders
+    headers["Content-Type"] = StreamKind.hls.mimeType
+    headers["Content-Length"] = "\(contentLength)"
+    headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    headers["Pragma"] = "no-cache"
+    headers["Expires"] = "0"
+    return headers
+}
+
+/// Whether a manifest whose live refresh failed upstream should fall back to the copy captured at
+/// extraction time instead of surfacing the upstream response to the player. These CDNs routinely
+/// reject direct fetches with 403 (only the authenticated browser session is allowed); such an error
+/// — or an empty body — must never reach the player as if it were a real playlist.
+func shouldServeCachedManifestOnUpstreamFailure(
+    isPlaylist: Bool,
+    upstreamStatus: Int,
+    bodyIsEmpty: Bool,
+    hasCachedCopy: Bool
+) -> Bool {
+    guard isPlaylist, hasCachedCopy else {
+        return false
+    }
+    let upstreamOK = (upstreamStatus == 200 || upstreamStatus == 206) && !bodyIsEmpty
+    return !upstreamOK
+}
+
 func isMasterHLSPlaylist(_ playlist: String) -> Bool {
     playlist.uppercased().contains("#EXT-X-STREAM-INF")
 }
@@ -427,8 +535,8 @@ func preferredPlaybackCandidates(
     from candidates: [StreamCandidate],
     cachedPlaylists: [String: String]
 ) -> [StreamCandidate] {
-    let preferred = candidates.filter { !isMasterHLSCandidate($0, cachedPlaylists: cachedPlaylists) }
-    return preferred.isEmpty ? candidates : preferred
+    let masters = candidates.filter { isMasterHLSCandidate($0, cachedPlaylists: cachedPlaylists) }
+    return masters.isEmpty ? candidates : masters
 }
 
 func referencedHLSPlaylistURLs(in playlist: String, playlistURL: URL) -> [URL] {
@@ -580,10 +688,10 @@ func decodeBase64DataURL(_ rawValue: String) -> Data? {
 }
 
 enum ProxyURLBuilder {
-    static func proxyURL(port: UInt16, targetURL: URL) -> URL {
+    static func proxyURL(port: UInt16, targetURL: URL, host: String = "127.0.0.1") -> URL {
         var components = URLComponents()
         components.scheme = "http"
-        components.host = "127.0.0.1"
+        components.host = host
         components.port = Int(port)
         components.path = "/proxy/stream" + proxyExtension(for: targetURL.absoluteString)
         components.queryItems = [
@@ -592,16 +700,30 @@ enum ProxyURLBuilder {
         return components.url!
     }
 
+    /// Real media-segment container extensions a player's HLS demuxer accepts as-is. Anything else —
+    /// no extension, images, or obfuscated disguises like `.json`/`.php` (segments are commonly
+    /// MPEG-TS dressed up to dodge filters) — is normalized to `.ts`. HLS demuxers (ffmpeg's
+    /// `allowed_extensions`, AVFoundation) reject unknown segment extensions outright, which breaks
+    /// playback even when the bytes are valid TS.
+    private static let mediaSegmentExtensions: Set<String> = [
+        "ts", "mp4", "m4s", "m4v", "m4a", "mp4a", "aac", "mp3", "ac3", "ec3", "vtt", "webvtt",
+    ]
+
     static func proxyExtension(for rawTargetURL: String) -> String {
         let parsed = getPathAndExtension(from: rawTargetURL)
         let pathExtension = parsed.pathExtension.lowercased()
-        if !pathExtension.isEmpty {
-            return ".\(pathExtension)"
-        }
-        if rawTargetURL.lowercased().contains(".m3u8") {
+
+        if pathExtension == "m3u8" || rawTargetURL.lowercased().contains(".m3u8") {
             return ".m3u8"
         }
-        return ".bin"
+        if pathExtension == "key" || pathExtension == "bin" {
+            return ".\(pathExtension)"
+        }
+        if mediaSegmentExtensions.contains(pathExtension) {
+            return ".\(pathExtension)"
+        }
+
+        return ".ts"
     }
 }
 

@@ -4,9 +4,11 @@ import Foundation
 
 @MainActor
 final class PolluxAppModel: ObservableObject {
+    static let mainWindowID = "pollux-main-window"
     static let playerWindowID = "pollux-player-window"
     static let infoWindowID = "pollux-info-window"
     static let logWindowID = "pollux-log-window"
+    static let errorWindowID = "pollux-error-window"
 
     @Published var pageURLString: String
     @Published var isExtracting = false
@@ -35,6 +37,11 @@ final class PolluxAppModel: ObservableObject {
             .dropFirst()
             .first(where: { $0.hasPrefix("http://") || $0.hasPrefix("https://") }) ?? ""
         self.permissionIssue = nil
+
+        // Reap any extraction browsers left over from a previous run (crash / force-quit).
+        Task.detached(priority: .utility) {
+            ChromiumProcessTracker.shared.cleanupOrphans()
+        }
     }
 
     func cancelExtraction() {
@@ -156,6 +163,9 @@ final class PolluxAppModel: ObservableObject {
         let item = AVPlayerItem(url: playerURL)
         let nextPlayer = AVPlayer(playerItem: item)
         nextPlayer.automaticallyWaitsToMinimizeStalling = true
+        // Allow AirPlay-to-Apple-TV. The proxy advertises the Mac's LAN IP so the receiver can fetch
+        // the stream itself.
+        nextPlayer.allowsExternalPlayback = true
 
         player?.pause()
         if let existingProxy = proxyServer {
