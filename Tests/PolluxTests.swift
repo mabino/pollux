@@ -197,7 +197,7 @@ final class PolluxTests: XCTestCase {
     }
 
     func testInvestigatePageURL() async throws {
-        let pageURL = try XCTUnwrap(URL(string: "https://example.com/watch/philadelphia-phillies-vs-los-angeles-dodgers-2388377/admin/1"))
+        let pageURL = try XCTUnwrap(URL(string: "https://example.com/watch/stream-1/admin/1"))
         XCTAssertEqual(pageURL.scheme, "https")
     }
 
@@ -538,8 +538,8 @@ final class PolluxTests: XCTestCase {
     }
 
     func testMasterPlaylistSelectionOverVariantForLiveBroadcast() throws {
-        let masterURL = try XCTUnwrap(URL(string: "https://cdn.cdn.example.com/secure/playlist.m3u8"))
-        let variantURL = try XCTUnwrap(URL(string: "https://cdn.cdn.example.com/secure/high/mono.m3u8"))
+        let masterURL = try XCTUnwrap(URL(string: "https://cdn.example.com/secure/playlist.m3u8"))
+        let variantURL = try XCTUnwrap(URL(string: "https://cdn.example.com/secure/high/mono.m3u8"))
 
         let masterCandidate = StreamCandidate(url: masterURL, headers: [:], kind: .hls, score: 100)
         let variantCandidate = StreamCandidate(url: variantURL, headers: [:], kind: .hls, score: 50)
