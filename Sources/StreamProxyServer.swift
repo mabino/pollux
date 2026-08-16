@@ -227,6 +227,11 @@ actor StreamProxyServer {
 
         let isTargetURLPlaylist = targetURL.pathExtension.lowercased() == "m3u8" || request.url.path.lowercased().hasSuffix(".m3u8")
 
+        // Cookie-authorized streams need the browser session's page context to fetch playlists/segments
+        // (the CDN rejects a direct request without the session cookie). Token-authorized streams carry
+        // their auth in the URL and are fetchable directly, so the browser round-trip is pure overhead.
+        let streamUsesCookieAuth = stream.headers.contains { $0.key.lowercased() == "cookie" && !$0.value.isEmpty }
+
         if isTargetURLPlaylist {
             // Master playlists (and explicitly finished VOD playlists) are static indexes, so
             // it is safe to pin them to the browser-extraction cache. Live media playlists are
@@ -242,11 +247,16 @@ actor StreamProxyServer {
                 )
             }
 
-            if let browserSession = stream.session {
+            // Only pay for a browser-context playlist fetch when the stream is cookie-authorized. A
+            // token-authorized stream (auth carried in the URL, no Cookie header) is fetchable directly,
+            // and the browser fetch merely fails cross-origin ("Failed to fetch") on every reload before
+            // the direct URLSession path below succeeds — so we skip it. The browser fallback further
+            // down still covers a failed direct fetch for either kind.
+            if streamUsesCookieAuth, let browserSession = stream.session {
                 do {
                     let fetchedText = try await browserSession.fetchTextResource(at: targetURL, timeout: 6)
                     print("[Proxy] Live playlist fetchTextResource returned length=\(fetchedText.count) prefix=\(String(fetchedText.prefix(40)))")
-                    if !fetchedText.isEmpty && !fetchedText.hasPrefix("ERROR:") {
+                    if !fetchedText.isEmpty && !isBrowserFetchError(fetchedText) && looksLikeHLSPlaylistText(fetchedText) {
                         return try playlistResponse(
                             from: Data(fetchedText.utf8),
                             playlistURL: targetURL,
@@ -259,9 +269,9 @@ actor StreamProxyServer {
                 }
             }
 
-            // The browser session could not deliver a fresh playlist. Fall through to a direct
-            // URLSession fetch below (with the captured stream headers) so the live window is still
-            // refreshed. The stale cached copy is only used as a last resort, further down.
+            // The browser session was skipped or could not deliver a fresh playlist. Fall through to a
+            // direct URLSession fetch below (with the captured stream headers) so the live window is
+            // still refreshed. The stale cached copy is only used as a last resort, further down.
         }
 
         var upstreamRequest = URLRequest(url: targetURL)
@@ -297,7 +307,8 @@ actor StreamProxyServer {
             if isPlaylist {
                 if let browserFetchedText = try? await browserSession.fetchTextResource(at: targetURL, timeout: 6),
                    !browserFetchedText.isEmpty,
-                   !browserFetchedText.hasPrefix("ERROR:")
+                   !isBrowserFetchError(browserFetchedText),
+                   looksLikeHLSPlaylistText(browserFetchedText)
                 {
                     print("[Proxy] Upstream failed with \(statusCode) via URLSession. Successfully fetched playlist text via browser.")
                     responseBodyData = Data(browserFetchedText.utf8)

@@ -52,6 +52,37 @@ Run unit tests via Xcode or command line:
 xcodebuild test -scheme Pollux -destination 'platform=macOS'
 ```
 
+## Releasing (signed & notarized)
+
+Cutting a distributable build requires an Apple **Developer ID Application** certificate and
+notarization credentials. Configure a reusable notarytool keychain profile once (App Store Connect
+API key recommended):
+
+```bash
+xcrun notarytool store-credentials "Pollux" \
+  --key ~/.appstoreconnect/private_keys/AuthKey_<KEYID>.p8 \
+  --key-id <KEYID> \
+  --issuer <ISSUER-UUID>
+```
+
+Then export the release identity and run the two scripts:
+
+```bash
+export POLLUX_TEAM_ID="<TEAMID>"
+export POLLUX_DEVELOPER_ID_APP="Developer ID Application: <Name> (<TEAMID>)"
+export POLLUX_NOTARY_KEYCHAIN_PROFILE="Pollux"   # or POLLUX_APPLE_ID + POLLUX_APPLE_APP_PASSWORD
+
+# Archive (Release, hardened runtime, --timestamp), notarize the app, and staple it
+./scripts/notarize.zsh
+
+# Package the stapled app into a DMG, then notarize and staple the DMG
+./scripts/package-dmg.zsh v0.2.0
+```
+
+Both scripts fall back to `POLLUX_APPLE_ID` + `POLLUX_APPLE_APP_PASSWORD` if no keychain profile is
+set. `package-dmg.zsh` still produces a signed DMG when no notary credentials are present (it just
+skips the notarization step).
+
 ## License
 
 This project is licensed under the MIT License - see [LICENSE.md](LICENSE.md) for details.

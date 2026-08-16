@@ -226,6 +226,58 @@ final class PolluxTests: XCTestCase {
         XCTAssertEqual(resolved.absoluteString, "https://lb11.cdn-stream.example/secure/rtmp/stream/1/high/mono.m3u8?token=abc%20123")
     }
 
+    func testSafeURLStripsStrayBackslashesFromEscapedURLs() throws {
+        // A URL that was shell-escaped inside double quotes arrives with literal backslashes before its
+        // query delimiters. Without stripping, these percent-encode to %5C and corrupt the path/query.
+        let escaped = #"https://host.example/football/match-123/basel-vs-barca.html\?icg\=VVM\&ilang\=en"#
+        let url = try XCTUnwrap(safeURL(from: escaped))
+
+        XCTAssertEqual(url.host, "host.example")
+        XCTAssertEqual(url.path, "/football/match-123/basel-vs-barca.html")
+        XCTAssertFalse(url.absoluteString.contains("%5C"), "backslashes must not survive as %5C")
+        XCTAssertEqual(url.query, "icg=VVM&ilang=en")
+    }
+
+    func testCandidatesWorthProbingDropsBareSegmentsButKeepsPlaylistsAndFiles() throws {
+        let masterURL = try XCTUnwrap(URL(string: "https://cdn.example/live/index.m3u8"))
+        // A disguised MPEG-TS segment: no .m3u8 extension, only classified .hls via its video/mp2t MIME.
+        let segmentURL = try XCTUnwrap(URL(string: "https://cdn.example/live/sx_1/1786894744076.json?token=abc"))
+        let fileURL = try XCTUnwrap(URL(string: "https://cdn.example/clip/video.mp4"))
+
+        let master = StreamCandidate(url: masterURL, headers: [:], kind: .hls, score: 100)
+        let segment = StreamCandidate(url: segmentURL, headers: [:], kind: .hls, score: 0)
+        let file = StreamCandidate(url: fileURL, headers: [:], kind: .mp4, score: 0)
+
+        let probed = candidatesWorthProbing([master, segment, file], cachedPlaylists: [:])
+        let probedURLs = Set(probed.map { $0.url.absoluteString })
+
+        XCTAssertTrue(probedURLs.contains(masterURL.absoluteString), "the HLS playlist must be probed")
+        XCTAssertTrue(probedURLs.contains(fileURL.absoluteString), "whole-file streams must be probed")
+        XCTAssertFalse(probedURLs.contains(segmentURL.absoluteString), "a bare HLS segment must be dropped")
+    }
+
+    func testCandidatesWorthProbingFallsBackWhenOnlySegmentsCaptured() throws {
+        let segmentURL = try XCTUnwrap(URL(string: "https://cdn.example/live/sx_1/seg-1.json?token=abc"))
+        let segment = StreamCandidate(url: segmentURL, headers: [:], kind: .hls, score: 0)
+
+        // With nothing playlist-like, we must not filter down to zero — the segment is all we have.
+        let probed = candidatesWorthProbing([segment], cachedPlaylists: [:])
+        XCTAssertEqual(probed.map { $0.url.absoluteString }, [segmentURL.absoluteString])
+    }
+
+    func testCandidatesWorthProbingKeepsHLSCandidateWithM3U8Body() throws {
+        // An HLS media playlist served without an .m3u8 extension is still an entry point when its cached
+        // body is a real M3U8 — it must not be mistaken for a segment.
+        let playlistURL = try XCTUnwrap(URL(string: "https://cdn.example/live/chan?fmt=hls"))
+        let playlist = StreamCandidate(url: playlistURL, headers: [:], kind: .hls, score: 0)
+
+        let probed = candidatesWorthProbing(
+            [playlist],
+            cachedPlaylists: [playlistURL.absoluteString: "#EXTM3U\n#EXTINF:6,\nseg-1.ts"]
+        )
+        XCTAssertEqual(probed.map { $0.url.absoluteString }, [playlistURL.absoluteString])
+    }
+
     func testIsPlaylistClassification() throws {
         let hlsURL = try XCTUnwrap(URL(string: "https://example.com/stream.m3u8"))
         let tsURL = try XCTUnwrap(URL(string: "https://example.com/segment.ts"))
@@ -633,6 +685,105 @@ final class PolluxTests: XCTestCase {
         XCTAssertEqual(AntiAutomationLevel.resolved(from: defaults), .off)
     }
 
+    // MARK: - Capture scoring & ordering
+
+    func testHLSCandidateScoreRanksMastersAboveVariantsAndSegments() {
+        XCTAssertEqual(hlsCandidateScore(forURLString: "https://cdn.example.com/master.m3u8"), 100)
+        XCTAssertEqual(hlsCandidateScore(forURLString: "https://cdn.example.com/playlist.m3u8"), 50)
+        XCTAssertEqual(hlsCandidateScore(forURLString: "https://cdn.example.com/720p/index.m3u8"), -50)
+        XCTAssertEqual(hlsCandidateScore(forURLString: "https://cdn.example.com/chunklist_1.m3u8"), -50)
+        // master (+100) and playlist (+50) both present.
+        XCTAssertEqual(hlsCandidateScore(forURLString: "https://cdn.example.com/master/playlist.m3u8"), 150)
+        // A query string does not affect the path-based score.
+        XCTAssertEqual(hlsCandidateScore(forURLString: "https://cdn.example.com/index.m3u8?token=abc"), 0)
+    }
+
+    func testIsBetterCandidateOrdersByScoreThenURL() {
+        // Higher score sorts first.
+        XCTAssertTrue(isBetterCandidate(scoreL: 100, urlL: "https://z.example", scoreR: 50, urlR: "https://a.example"))
+        XCTAssertFalse(isBetterCandidate(scoreL: 50, urlL: "https://a.example", scoreR: 100, urlR: "https://z.example"))
+        // Equal score → lexicographically smaller URL sorts first (stable tie-break).
+        XCTAssertTrue(isBetterCandidate(scoreL: 50, urlL: "https://a.example", scoreR: 50, urlR: "https://b.example"))
+        XCTAssertFalse(isBetterCandidate(scoreL: 50, urlL: "https://b.example", scoreR: 50, urlR: "https://a.example"))
+    }
+
+    // MARK: - Browser fetch sentinel
+
+    func testIsBrowserFetchErrorDetectsSentinel() {
+        XCTAssertTrue(isBrowserFetchError("ERROR: TypeError: Failed to fetch"))
+        XCTAssertFalse(isBrowserFetchError("#EXTM3U\n#EXT-X-VERSION:3"))
+        XCTAssertFalse(isBrowserFetchError(""))
+    }
+
+    func testLooksLikeHLSPlaylistTextRejectsErrorPages() {
+        XCTAssertTrue(looksLikeHLSPlaylistText("#EXTM3U\n#EXT-X-VERSION:3\nseg0.ts"))
+        // A 403/404 HTML error page must NOT be treated as a playlist (the bug that produced garbage segments).
+        XCTAssertFalse(looksLikeHLSPlaylistText("<html>\n<head><title>403 Forbidden</title></head>\n<body></body>\n</html>"))
+        XCTAssertFalse(looksLikeHLSPlaylistText(""))
+    }
+
+    // MARK: - Polling
+
+    func testWaitUntilReturnsTrueWhenConditionFlipsBeforeDeadline() async throws {
+        let counter = TestCounterBox()
+        let reached = try await waitUntil(deadline: Date().addingTimeInterval(2), interval: 0.02) {
+            await counter.incrementAndReachedThree()
+        }
+        XCTAssertTrue(reached)
+    }
+
+    func testWaitUntilReturnsFalseAtDeadline() async throws {
+        let reached = try await waitUntil(deadline: Date().addingTimeInterval(0.2), interval: 0.02) { false }
+        XCTAssertFalse(reached)
+    }
+
+    // MARK: - Interaction pipeline
+
+    func testInteractionPipelineStepOrder() {
+        XCTAssertEqual(
+            InteractionStep.pipeline.map(\.name),
+            ["probePageState", "blankPageRecovery", "turnstileBypass", "iframeNavigation", "viewportClick", "playButtons"]
+        )
+    }
+
+    // MARK: - Target configuration (gap H)
+
+    func testTargetConfiguratorAppliesFullSetupToRootAndChildren() async {
+        let profile = BrowserProfile(
+            userAgent: "Mozilla/5.0 Pollux-Test",
+            acceptLanguage: "en-US,en;q=0.9",
+            platform: "MacIntel",
+            windowWidth: 1280,
+            windowHeight: 720
+        )
+        let configurator = TargetConfigurator(profile: profile, mitigation: false)
+
+        // Root target (sessionId nil) receives the full setup.
+        let root = SpyTargetConfigurable()
+        await configurator.apply(on: root, sessionId: nil)
+        let rootCalls = await root.calls
+        XCTAssertEqual(
+            rootCalls.map(\.method),
+            ["Network.enable", "Target.setAutoAttach", "addStealthScript", "setUserAgentOverride"]
+        )
+        XCTAssertTrue(rootCalls.allSatisfy { $0.sessionId == nil })
+
+        // Child target (OOPIF) now receives stealth + UA parity, not just Network + auto-attach (gap H).
+        let child = SpyTargetConfigurable()
+        await configurator.apply(on: child, sessionId: "child-session-1")
+        let childCalls = await child.calls
+        XCTAssertEqual(
+            childCalls.map(\.method),
+            ["Network.enable", "Target.setAutoAttach", "addStealthScript", "setUserAgentOverride"]
+        )
+        XCTAssertTrue(childCalls.allSatisfy { $0.sessionId == "child-session-1" })
+        let childUA = await child.lastUserAgent
+        XCTAssertEqual(childUA, "Mozilla/5.0 Pollux-Test")
+        // Mitigation off → the baseline stealth script is used.
+        let childStealth = await child.lastStealthScript
+        XCTAssertEqual(childStealth, profile.stealthScript)
+    }
+
 }
 
 /// Records `close()` calls so tests can assert the proxy's session ownership semantics without
@@ -643,4 +794,44 @@ actor SpyBrowserSession: BrowserSession {
     func fetchTextResource(at url: URL, timeout: TimeInterval) async throws -> String { "" }
     func fetchBinaryResource(at url: URL, timeout: TimeInterval) async throws -> Data { Data() }
     func close() async { closeCount += 1 }
+}
+
+/// Counter that flips true on its third call — drives the `waitUntil` "condition becomes true" test.
+actor TestCounterBox {
+    private var count = 0
+    func incrementAndReachedThree() -> Bool {
+        count += 1
+        return count >= 3
+    }
+}
+
+/// Records the CDP commands `TargetConfigurator` issues so its behavior (including the gap-H child
+/// parity fix) can be asserted without a live browser.
+actor SpyTargetConfigurable: CDPTargetConfigurable {
+    struct Call: Equatable {
+        let method: String
+        let sessionId: String?
+    }
+
+    private(set) var calls: [Call] = []
+    private(set) var lastStealthScript: String?
+    private(set) var lastUserAgent: String?
+
+    func enableDomain(_ domain: String, sessionId: String?) async {
+        calls.append(Call(method: "\(domain).enable", sessionId: sessionId))
+    }
+
+    func setAutoAttach(sessionId: String?) async {
+        calls.append(Call(method: "Target.setAutoAttach", sessionId: sessionId))
+    }
+
+    func addStealthScript(_ source: String, sessionId: String?) async {
+        calls.append(Call(method: "addStealthScript", sessionId: sessionId))
+        lastStealthScript = source
+    }
+
+    func setUserAgentOverride(userAgent: String, acceptLanguage: String, platform: String, sessionId: String?) async {
+        calls.append(Call(method: "setUserAgentOverride", sessionId: sessionId))
+        lastUserAgent = userAgent
+    }
 }

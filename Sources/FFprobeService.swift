@@ -41,7 +41,11 @@ final class FFprobeService: @unchecked Sendable {
         self.executableURL = executableURL
     }
 
-    func probe(candidate: StreamCandidate) async throws -> ProbeResult {
+    /// - Parameter timeout: Hard wall-clock limit for a single probe. ffprobe against a live segment or
+    ///   an expired-token URL can otherwise block forever on a network read, and because candidate
+    ///   selection awaits every probe, one wedged probe stalls the whole extraction. The watchdog below
+    ///   terminates the process at the deadline so a bad candidate fails fast instead of hanging.
+    func probe(candidate: StreamCandidate, timeout: TimeInterval = 15) async throws -> ProbeResult {
         let task = Task.detached(priority: .userInitiated) { [executableURL] in
             let process = Process()
             process.executableURL = executableURL
@@ -50,6 +54,9 @@ final class FFprobeService: @unchecked Sendable {
                 "-v", "error",
                 "-print_format", "json",
                 "-show_entries", "format=format_name,bit_rate:stream=codec_type,codec_name,width,height",
+                // Cap network read/write blocking inside ffprobe itself (microseconds). Belt-and-braces
+                // with the process watchdog: this trips on a slow single read; the watchdog bounds total.
+                "-rw_timeout", "10000000",
             ]
 
             let formattedHeaders = formatHTTPHeaders(candidate.headers)
@@ -73,6 +80,19 @@ final class FFprobeService: @unchecked Sendable {
 
             try process.run()
 
+            // Watchdog: terminate the process if it outlives the deadline, then hard-kill if it ignores
+            // SIGTERM. Closing its pipes unblocks the reads below so this probe resolves as a failure.
+            let watchdog = Task {
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                if process.isRunning {
+                    process.terminate()
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    if process.isRunning {
+                        kill(process.processIdentifier, SIGKILL)
+                    }
+                }
+            }
+
             let stdoutHandle = stdout.fileHandleForReading
             let stderrHandle = stderr.fileHandleForReading
 
@@ -81,6 +101,7 @@ final class FFprobeService: @unchecked Sendable {
             let stderrData = await Task.detached { stderrHandle.readDataToEndOfFile() }.value
 
             process.waitUntilExit()
+            watchdog.cancel()
 
             guard process.terminationStatus == 0 else {
                 let reason = String(decoding: stderrData, as: UTF8.self)

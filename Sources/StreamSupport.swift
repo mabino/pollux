@@ -771,8 +771,12 @@ private func canonicalHTTPHeaderName(_ rawName: String) -> String {
         .joined(separator: "-")
 }
 
+/// `URI="…"` attribute value inside an HLS tag (e.g. `#EXT-X-KEY`, `#EXT-X-MEDIA`). Compiled once and
+/// reused, since it is applied to every line of every playlist that flows through the proxy.
+private let attributeURIRegex = try! NSRegularExpression(pattern: #"URI="([^"]+)""#)
+
 private func rewriteAttributeURIs(in line: String, playlistURL: URL, proxyURL: (URL) -> URL) -> String {
-    let expression = try! NSRegularExpression(pattern: #"URI="([^"]+)""#)
+    let expression = attributeURIRegex
     let nsLine = line as NSString
     let matches = expression.matches(in: line, range: NSRange(location: 0, length: nsLine.length))
     guard !matches.isEmpty else {
@@ -796,7 +800,7 @@ private func rewriteAttributeURIs(in line: String, playlistURL: URL, proxyURL: (
 }
 
 private func attributeURIValues(in line: String) -> [String] {
-    let expression = try! NSRegularExpression(pattern: #"URI="([^"]+)""#)
+    let expression = attributeURIRegex
     let nsLine = line as NSString
     let matches = expression.matches(in: line, range: NSRange(location: 0, length: nsLine.length))
     return matches.compactMap { match in
@@ -825,7 +829,16 @@ func sanitizedReason(_ rawReason: String, fallback: String) -> String {
 }
 
 func safeURL(from string: String) -> URL? {
-    if let url = URL(string: string) {
+    // Strip surrounding whitespace, control characters, and stray backslashes before parsing. A literal
+    // backslash is never valid in a URL — it slips in from shell-escaped (`\?`, `\=`, `\&`) or copy-pasted
+    // links. Left in place it can't be parsed, so the fallback below percent-encodes it to `%5C`, which
+    // silently corrupts the path/query (e.g. `.html%5C?icg%5C=…`) and navigates to the wrong page while
+    // still appearing to "load."
+    let cleaned = String(String.UnicodeScalarView(string.unicodeScalars.filter { scalar in
+        scalar != "\\" && !CharacterSet.controlCharacters.contains(scalar)
+    })).trimmingCharacters(in: .whitespacesAndNewlines)
+
+    if let url = URL(string: cleaned) {
         return url
     }
     var allowed = CharacterSet.urlQueryAllowed
@@ -833,7 +846,7 @@ func safeURL(from string: String) -> URL? {
     allowed.formUnion(CharacterSet.urlHostAllowed)
     allowed.formUnion(CharacterSet.urlUserAllowed)
     allowed.formUnion(CharacterSet.urlPasswordAllowed)
-    if let encoded = string.addingPercentEncoding(withAllowedCharacters: allowed) {
+    if let encoded = cleaned.addingPercentEncoding(withAllowedCharacters: allowed) {
         return URL(string: encoded)
     }
     return nil
@@ -887,4 +900,99 @@ func getPathAndExtension(from urlString: String) -> (path: String, pathExtension
     let parts = lastPathComponent.split(separator: ".")
     let pathExtension = parts.count > 1 ? String(parts.last!) : ""
     return (path, pathExtension)
+}
+
+// MARK: - Capture scoring & ordering
+
+/// Heuristic score for how good an HLS URL is as a playback entry point, judged from its path shape:
+/// a master playlist (+100) is preferred over a media/variant playlist (+50), and an individual quality
+/// rendition or segment path (−50) is penalized. Shared by the live network capture collector and the
+/// cached-playlist candidate builder so both rank URLs by exactly the same rule.
+func hlsCandidateScore(forURLString rawURL: String) -> Int {
+    let path = getPathAndExtension(from: rawURL).path.lowercased()
+    var score = 0
+
+    if path.contains("master") {
+        score += 100
+    }
+    if path.contains("playlist") {
+        score += 50
+    }
+    for pattern in ["/720p/", "/1080p/", "/480p/", "/360p/", "/240p/", "/chunklist", "/media-", "/segment"] {
+        if path.contains(pattern) {
+            score -= 50
+            break
+        }
+    }
+
+    return score
+}
+
+/// Canonical "best candidate first" ordering: higher score wins, and on a tie the lexicographically
+/// smaller URL wins so the result is stable and deterministic across runs. Used everywhere capture
+/// candidates are sorted or reduced to a single best pick.
+func isBetterCandidate(scoreL: Int, urlL: String, scoreR: Int, urlR: String) -> Bool {
+    if scoreL != scoreR {
+        return scoreL > scoreR
+    }
+    return urlL < urlR
+}
+
+// MARK: - Polling
+
+/// Polls `condition` every `interval` seconds until it returns true or `deadline` passes, returning
+/// whether it became true in time. Honors task cancellation (throws `CancellationError`) so a caller
+/// running inside an extraction timeout budget unwinds promptly. Replaces the hand-rolled
+/// `while Date() < deadline { … Task.sleep }` loops used for pure-condition waits.
+func waitUntil(
+    deadline: Date,
+    interval: TimeInterval,
+    _ condition: () async -> Bool
+) async throws -> Bool {
+    while Date() < deadline {
+        try Task.checkCancellation()
+        if await condition() {
+            return true
+        }
+        try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+    }
+    return false
+}
+
+// MARK: - Browser fetch sentinel
+
+/// Prefix of the sentinel string an in-page `fetch` helper returns when it fails. A CDP
+/// `Runtime.evaluate` can only hand back a string, so failures are signaled as `"ERROR: …"` rather
+/// than thrown. Both the session's fetch helpers and the proxy's browser-fetch fallback key on this.
+let browserFetchErrorPrefix = "ERROR:"
+
+/// True when a browser-side fetch returned the failure sentinel instead of the resource body.
+func isBrowserFetchError(_ text: String) -> Bool {
+    text.hasPrefix(browserFetchErrorPrefix)
+}
+
+/// True when `text` is an actual HLS playlist (contains the `#EXTM3U` tag) rather than something a
+/// failed fetch can return that is still non-empty and not the `"ERROR:"` sentinel — most importantly
+/// an HTTP 403/404 error page. Without this check the proxy would relabel that error HTML as a `200`
+/// playlist and rewrite its lines into bogus segments, permanently stalling playback instead of
+/// letting the graceful cached-copy fallback (and the player's next reload) recover.
+func looksLikeHLSPlaylistText(_ text: String) -> Bool {
+    text.uppercased().contains("#EXTM3U")
+}
+
+// MARK: - Stream URL harvesting patterns
+
+/// Matches an absolute `.m3u8` URL anywhere in text (e.g. a console log line or an API JSON body).
+let m3u8Regex = try! NSRegularExpression(pattern: #"https?://[^\s"'<>]+\.m3u8[^\s"'<>]*"#)
+/// Matches an HLS URL embedded in API JSON that lives under an `/hls/` or `/live/` path without a
+/// `.m3u8` suffix — some players are handed a suffix-less manifest URL.
+let hlsURLRegex = try! NSRegularExpression(pattern: #"https?://[^\s"'<>]+/(?:hls|live)/[^\s"'<>]*"#)
+
+extension NSRegularExpression {
+    /// All full-match substrings of `text`, in order. Convenience over the range-based CoreFoundation API.
+    func matches(in text: String) -> [String] {
+        let nsText = text as NSString
+        let results = matches(in: text, range: NSRange(location: 0, length: nsText.length))
+        return results.map { nsText.substring(with: $0.range) }
+    }
 }

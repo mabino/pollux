@@ -37,4 +37,14 @@ final class ExtractionLogger: ObservableObject {
     func clear() {
         logs.removeAll()
     }
+
+    /// Fire-and-forget append callable from any isolation context. Collapses the
+    /// `Task { @MainActor in ExtractionLogger.shared.append(...) }` boilerplate that pervades the
+    /// extraction pipeline (which runs off the main actor) into a single call. The message is built
+    /// lazily on the main actor, matching the original behavior where interpolation ran inside the Task.
+    nonisolated static func log(_ message: @autoclosure @escaping @Sendable () -> String) {
+        Task { @MainActor in
+            shared.append(message())
+        }
+    }
 }
