@@ -10,6 +10,7 @@ Pollux is a native macOS GUI application for media stream extraction and playbac
 - **Stealth & Bot-Mitigation Options**: Configurable anti-automation levels to bypass script challenges and quiet CDP fingerprints.
 - **Command-Line Interface**: Includes `pollux-cli` for terminal-based stream extraction and URL resolution.
 - **Recent Streams History**: Store and manage recently extracted streams with deduplication and quick playback options.
+- **Automatic Updates**: Signed in-app updates via [Sparkle](https://sparkle-project.org), with manual "Check for Updates" and configurable automatic checking.
 
 ## Purpose and Disclaimer
 

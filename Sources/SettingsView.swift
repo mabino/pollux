@@ -2,6 +2,9 @@ import AppKit
 import SwiftUI
 
 struct SettingsView: View {
+    /// Injected by the app so the Sparkle updates UI stays out of the base view (and out of the CLI /
+    /// test targets, which don't link Sparkle). Nil when there is no updater.
+    var updatesSection: AnyView? = nil
     @EnvironmentObject private var model: PolluxAppModel
     @AppStorage(PolluxPreferences.ffprobePathKey) private var ffprobePath = ""
     @AppStorage(PolluxPreferences.verboseExtractionLoggingKey) private var verboseExtractionLogging = false
@@ -24,6 +27,13 @@ struct SettingsView: View {
 
             permissionsTab
                 .tabItem { Label("Permissions", systemImage: "lock.shield") }
+
+            if let updatesSection {
+                Form { updatesSection }
+                    .formStyle(.grouped)
+                    .padding(20)
+                    .tabItem { Label("Updates", systemImage: "arrow.triangle.2.circlepath") }
+            }
         }
         .frame(width: 600, height: 400)
         .onChange(of: ffprobePath) { _, _ in

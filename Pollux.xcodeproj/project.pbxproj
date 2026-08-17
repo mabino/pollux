@@ -12,6 +12,7 @@
 		11A22D9F2BD82E1C0990417C /* CaptureCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C83377018DEA54C541B390 /* CaptureCollector.swift */; };
 		1B03CE0885F9A5C121E6D377 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D981465B752B8448E0DECF /* SettingsView.swift */; };
 		23FD6FB5778D81B75C07DB6A /* NetworkInterface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E105AF20DC3B479C6EDE167 /* NetworkInterface.swift */; };
+		248EDA61793129F37D5F1C7D /* UpdaterViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49EFE3C36226667429DE36D9 /* UpdaterViewModel.swift */; };
 		2E6CF346FE76EB36D553C302 /* ExtractionLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6679A0EAE43AD546CCA7C4EE /* ExtractionLogger.swift */; };
 		2EEB7DA6701596CB78D418B6 /* PlayerWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F9DCE7059DDE7EEA0CDF901 /* PlayerWindowView.swift */; };
 		2FC8FAFD7D436868F0DFDB59 /* ChromeBrowserSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CD090C2CB0DD6B5F0E38BD7 /* ChromeBrowserSession.swift */; };
@@ -29,11 +30,13 @@
 		5FF995E11F0DC463EA2B297A /* NetworkInterface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E105AF20DC3B479C6EDE167 /* NetworkInterface.swift */; };
 		64C021061D87A8B3CC445542 /* FFprobeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B7CD110198385718C925B5F /* FFprobeService.swift */; };
 		686C17841F9279AF6F5FCA30 /* SupportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6AF7D04B080E5CF53029ADE /* SupportViews.swift */; };
+		7C1A26A355A1A3C32B58C447 /* SparkleUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2112C26DA0A3AD9A86B788 /* SparkleUpdater.swift */; };
 		7DD5D0BF1036E0A727A4708D /* RecentStreams.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE15163C89EF31355DBA4A86 /* RecentStreams.swift */; };
 		7DD92972461D822DC9BF1BBB /* BrowserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC90589CFD64C91BF827BC7D /* BrowserProfile.swift */; };
 		85172557BCE023615EE89E17 /* StreamInfoWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DE8B910F999C456FB54C747 /* StreamInfoWindowView.swift */; };
 		95C409891AC08CC5514A99B8 /* CDPConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F817371E8EB6BC76F2AC790 /* CDPConnection.swift */; };
 		98FF772BCF1A0F61D2CBAD22 /* StreamSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977ADF7E6066D6815495C684 /* StreamSupport.swift */; };
+		9C5FE401898A811CBEA3FE16 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 7F5291663FCF603190DD179F /* Sparkle */; };
 		BB25FFA94D693842CA9B79C1 /* AVPlayerViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFF11F262B703FDD428E65B2 /* AVPlayerViewContainer.swift */; };
 		C4600ECD6103C84C26C73432 /* BrowserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC90589CFD64C91BF827BC7D /* BrowserProfile.swift */; };
 		C7CD6CBABDEFE48E434B6ACD /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63C53E2715FC9D52E9BF14B4 /* MainWindowView.swift */; };
@@ -65,6 +68,7 @@
 		119F4ED4D5EED5C04EFE1F95 /* PolluxAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolluxAppModel.swift; sourceTree = "<group>"; };
 		12D981465B752B8448E0DECF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		34B081E6597C0E8CAEF26C74 /* ExtractionLogWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtractionLogWindowView.swift; sourceTree = "<group>"; };
+		49EFE3C36226667429DE36D9 /* UpdaterViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterViewModel.swift; sourceTree = "<group>"; };
 		4B7CD110198385718C925B5F /* FFprobeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FFprobeService.swift; sourceTree = "<group>"; };
 		63C53E2715FC9D52E9BF14B4 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
 		650F51E268F8F24D3B81022E /* pollux-cli */ = {isa = PBXFileReference; includeInIndex = 0; path = "pollux-cli"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -79,6 +83,7 @@
 		977ADF7E6066D6815495C684 /* StreamSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamSupport.swift; sourceTree = "<group>"; };
 		98502FCB03279E79D971D577 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		A1C83377018DEA54C541B390 /* CaptureCollector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureCollector.swift; sourceTree = "<group>"; };
+		AA2112C26DA0A3AD9A86B788 /* SparkleUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SparkleUpdater.swift; sourceTree = "<group>"; };
 		AC2893CEABE104DCED1DC487 /* InteractionPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionPipeline.swift; sourceTree = "<group>"; };
 		C3061F5FC78AA16A480FEDBC /* BrowserStreamExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowserStreamExtractor.swift; sourceTree = "<group>"; };
 		CFF11F262B703FDD428E65B2 /* AVPlayerViewContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AVPlayerViewContainer.swift; sourceTree = "<group>"; };
@@ -90,6 +95,17 @@
 		EC2F5AC0710188F958CCFA9F /* PolluxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolluxApp.swift; sourceTree = "<group>"; };
 		EFA6305DE672222C5F0032B2 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		CE4EC0E470457AD14C973B6C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9C5FE401898A811CBEA3FE16 /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		19002867FAECF8924E3EC6FB /* CLI */ = {
@@ -151,10 +167,12 @@
 				119F4ED4D5EED5C04EFE1F95 /* PolluxAppModel.swift */,
 				DE15163C89EF31355DBA4A86 /* RecentStreams.swift */,
 				12D981465B752B8448E0DECF /* SettingsView.swift */,
+				AA2112C26DA0A3AD9A86B788 /* SparkleUpdater.swift */,
 				6DE8B910F999C456FB54C747 /* StreamInfoWindowView.swift */,
 				6E9123BDEDE3CC75926D4C0B /* StreamProxyServer.swift */,
 				977ADF7E6066D6815495C684 /* StreamSupport.swift */,
 				E6AF7D04B080E5CF53029ADE /* SupportViews.swift */,
+				49EFE3C36226667429DE36D9 /* UpdaterViewModel.swift */,
 				19002867FAECF8924E3EC6FB /* CLI */,
 			);
 			path = Sources;
@@ -187,6 +205,7 @@
 			buildPhases = (
 				787D177E372A9AEE39CAA3AF /* Sources */,
 				52F99FD0928448EBCC95CB94 /* Resources */,
+				CE4EC0E470457AD14C973B6C /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -194,6 +213,7 @@
 			);
 			name = Pollux;
 			packageProductDependencies = (
+				7F5291663FCF603190DD179F /* Sparkle */,
 			);
 			productName = Pollux;
 			productReference = 7DB2106D50BF65B7876E39DF /* Pollux.app */;
@@ -245,6 +265,9 @@
 			);
 			mainGroup = 8225E31AC4C6FB9558F0B23B;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				FAC79144C27A2B02846C620C /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1DFE4C135903A5928289BC10 /* Products */;
 			projectDirPath = "";
@@ -293,10 +316,12 @@
 				554C1B49F02CB39124CD13EF /* PolluxAppModel.swift in Sources */,
 				7DD5D0BF1036E0A727A4708D /* RecentStreams.swift in Sources */,
 				1B03CE0885F9A5C121E6D377 /* SettingsView.swift in Sources */,
+				7C1A26A355A1A3C32B58C447 /* SparkleUpdater.swift in Sources */,
 				85172557BCE023615EE89E17 /* StreamInfoWindowView.swift in Sources */,
 				EA65FB4FBE89FAFC7194192A /* StreamProxyServer.swift in Sources */,
 				3BFE022FF6F207E34A35CB82 /* StreamSupport.swift in Sources */,
 				686C17841F9279AF6F5FCA30 /* SupportViews.swift in Sources */,
+				248EDA61793129F37D5F1C7D /* UpdaterViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -358,12 +383,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Pollux;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
-				INFOPLIST_KEY_LSMinimumSystemVersion = 14.0;
-				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
-				INFOPLIST_KEY_NSSupportsAutomaticTermination = YES;
-				INFOPLIST_KEY_NSSupportsSuddenTermination = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Pollux/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -565,12 +586,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Pollux;
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
-				INFOPLIST_KEY_LSMinimumSystemVersion = 14.0;
-				INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads = YES;
-				INFOPLIST_KEY_NSSupportsAutomaticTermination = YES;
-				INFOPLIST_KEY_NSSupportsSuddenTermination = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Pollux/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -622,6 +639,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		FAC79144C27A2B02846C620C /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.6.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7F5291663FCF603190DD179F /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FAC79144C27A2B02846C620C /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = FBAF18ADB02ADD5A4704B0BB /* Project object */;
 }

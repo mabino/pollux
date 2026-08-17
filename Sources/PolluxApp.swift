@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct PolluxApp: App {
+    @NSApplicationDelegateAdaptor(PolluxAppDelegate.self) private var appDelegate
     @StateObject private var model = PolluxAppModel()
 
     var body: some Scene {
@@ -13,10 +14,13 @@ struct PolluxApp: App {
         .defaultSize(width: 540, height: 210)
         .commands {
             PolluxCommands(model: model)
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesView(viewModel: appDelegate.updaterViewModel)
+            }
         }
 
         Settings {
-            SettingsView()
+            SettingsView(updatesSection: AnyView(UpdatesSectionView(viewModel: appDelegate.updaterViewModel)))
                 .environmentObject(model)
         }
 

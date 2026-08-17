@@ -4,6 +4,11 @@ options:
   minimumXcodeGenVersion: 2.45.0
   createIntermediateGroups: true
 
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: 2.6.0
+
 settings:
   base:
     SWIFT_VERSION: 5.10
@@ -26,17 +31,33 @@ targets:
         excludes:
           - "CLI"
       - path: Assets.xcassets
+    dependencies:
+      - package: Sparkle
+    info:
+      path: Pollux/Info.plist
+      properties:
+        CFBundleDisplayName: Pollux
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.entertainment
+        LSMinimumSystemVersion: "14.0"
+        NSHighResolutionCapable: true
+        NSPrincipalClass: NSApplication
+        NSSupportsAutomaticTermination: true
+        NSSupportsSuddenTermination: true
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        # Sparkle auto-update: appcast feed (GitHub Pages) + EdDSA public key. The private key lives in
+        # the developer's login Keychain and signs each release via scripts/release-appcast.zsh.
+        SUFeedURL: https://mabino.github.io/pollux/appcast.xml
+        SUPublicEDKey: nDAE5HXFYg6pBQbAFtyEObXbHu9N7TM+7zUivRcRqNA=
+        SUEnableAutomaticChecks: true
     settings:
       base:
         PRODUCT_NAME: Pollux
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         PRODUCT_BUNDLE_IDENTIFIER: io.github.mabino.pollux-app
-        INFOPLIST_KEY_CFBundleDisplayName: Pollux
-        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.entertainment
-        INFOPLIST_KEY_LSMinimumSystemVersion: "14.0"
-        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: YES
-        INFOPLIST_KEY_NSSupportsAutomaticTermination: YES
-        INFOPLIST_KEY_NSSupportsSuddenTermination: YES
+        GENERATE_INFOPLIST_FILE: NO
 
   pollux-cli:
     type: tool
@@ -57,6 +78,8 @@ targets:
           - "PolluxAppModel.swift"
           - "ErrorWindowView.swift"
           - "RecentStreams.swift"
+          - "SparkleUpdater.swift"
+          - "UpdaterViewModel.swift"
     settings:
       base:
         PRODUCT_NAME: pollux-cli
