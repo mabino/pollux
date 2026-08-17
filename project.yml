@@ -1,0 +1,88 @@
+name: Pollux
+
+options:
+  minimumXcodeGenVersion: 2.45.0
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: 5.10
+    MARKETING_VERSION: 0.2.0
+    CURRENT_PROJECT_VERSION: 2
+    CODE_SIGN_STYLE: Automatic
+    GENERATE_INFOPLIST_FILE: YES
+    ENABLE_HARDENED_RUNTIME: YES
+    LD_RUNPATH_SEARCH_PATHS:
+      - $(inherited)
+      - "@executable_path/../Frameworks"
+
+targets:
+  Pollux:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources
+        excludes:
+          - "CLI"
+      - path: Assets.xcassets
+    settings:
+      base:
+        PRODUCT_NAME: Pollux
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.mabino.pollux-app
+        INFOPLIST_KEY_CFBundleDisplayName: Pollux
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.entertainment
+        INFOPLIST_KEY_LSMinimumSystemVersion: "14.0"
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: YES
+        INFOPLIST_KEY_NSSupportsAutomaticTermination: YES
+        INFOPLIST_KEY_NSSupportsSuddenTermination: YES
+
+  pollux-cli:
+    type: tool
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources
+        excludes:
+          - "PolluxApp.swift"
+          - "MainWindowView.swift"
+          - "AVPlayerViewContainer.swift"
+          - "PlayerWindowView.swift"
+          - "ExtractionLogWindowView.swift"
+          - "PermissionsRequiredView.swift"
+          - "SettingsView.swift"
+          - "StreamInfoWindowView.swift"
+          - "SupportViews.swift"
+          - "PolluxAppModel.swift"
+          - "ErrorWindowView.swift"
+          - "RecentStreams.swift"
+    settings:
+      base:
+        PRODUCT_NAME: pollux-cli
+
+  PolluxTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Pollux
+    settings:
+      base:
+        PRODUCT_NAME: PolluxTests
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.mabino.pollux.tests
+
+schemes:
+  Pollux:
+    build:
+      targets:
+        Pollux: all
+        PolluxTests: [test]
+    run:
+      config: Debug
+    test:
+      gatherCoverageData: true
+      targets:
+        - name: PolluxTests
