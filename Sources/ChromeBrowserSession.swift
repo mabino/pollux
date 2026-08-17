@@ -196,7 +196,32 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
 
     static func launch(
         profile: BrowserProfile,
-        eventHandler: @escaping @Sendable (String, Data) async -> Void
+        eventHandler: @escaping @Sendable (String, Data, String?) async -> Void
+    ) async throws -> ChromeBrowserSession {
+        // Chromium occasionally starts but drops its DevTools WebSocket during the launch handshake
+        // (port up, then the session closes before/while we configure), which surfaces as
+        // `browserDidNotExposeDevTools`. It's transient — often system pressure right after a prior
+        // browser teardown — so retry a few times with a short backoff before giving up. A dropped
+        // debug session shouldn't fail the whole extraction.
+        let maxAttempts = 4
+        var lastError: Error = PolluxError.browserDidNotExposeDevTools
+        for attempt in 1...maxAttempts {
+            do {
+                return try await launchOnce(profile: profile, eventHandler: eventHandler)
+            } catch PolluxError.browserDidNotExposeDevTools {
+                lastError = PolluxError.browserDidNotExposeDevTools
+                if attempt < maxAttempts {
+                    ExtractionLogger.log("Chromium debug session dropped during launch (attempt \(attempt)/\(maxAttempts)); retrying with a fresh browser.")
+                    try? await Task.sleep(nanoseconds: UInt64(attempt) * 700_000_000)
+                }
+            }
+        }
+        throw lastError
+    }
+
+    private static func launchOnce(
+        profile: BrowserProfile,
+        eventHandler: @escaping @Sendable (String, Data, String?) async -> Void
     ) async throws -> ChromeBrowserSession {
         guard let executableURL = locateChromiumExecutable() else {
             throw PolluxError.chromiumMissing
@@ -216,8 +241,10 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
         let diagnostics = ChromeLaunchDiagnostics(stdoutPipe: stdoutPipe, stderrPipe: stderrPipe)
 
         // Headful mode (opt-in): launch a real, visible window instead of headless so sites that
-        // detect and block headless Chromium still render their player.
+        // detect and block headless Chromium still render their player. Response-Relay Mode forces it
+        // on, since the relay only works while the in-page player actually renders and keeps fetching.
         let headful = UserDefaults.standard.bool(forKey: PolluxPreferences.headfulExtractionKey)
+            || UserDefaults.standard.bool(forKey: PolluxPreferences.mediaRelayKey)
         // Anti-automation mitigation (opt-in "quiet CDP" path): active at the Standard level, off
         // otherwise. See `AntiAutomationLevel` for what the mitigation changes at launch and over CDP.
         let mitigation = AntiAutomationLevel.resolved() == .standard
@@ -278,6 +305,11 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
     ) -> [String] {
         var arguments = [
             "--remote-debugging-port=0",
+            // Chromium 111+ rejects the DevTools WebSocket upgrade unless the connecting Origin is
+            // allow-listed. Our CDP client isn't a web origin, so allow all — without this the HTTP
+            // /json endpoints answer but the ws:// handshake is refused, which surfaces intermittently
+            // (as versions tighten) as "Chromium never exposed a debugging session".
+            "--remote-allow-origins=*",
             "--user-data-dir=\(userDataDirectory.path)",
             "--no-first-run",
             "--no-default-browser-check",
@@ -385,6 +417,30 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
         return nil
+    }
+
+    /// Resumes any paused `<video>` in a given child-target session (the OOPIF player), so a live
+    /// stream keeps advancing and the relay keeps seeing fresh segments. Idempotent — only touches
+    /// paused elements — so it's safe to call on a timer. Best-effort.
+    /// Returns false if the evaluate could not run (e.g. the CDP connection has closed because the
+    /// browser was torn down), so a keep-alive caller can stop looping.
+    @discardableResult
+    func resumePausedVideos(inSession sessionId: String?) async -> Bool {
+        let script = """
+        (() => {
+          let resumed = 0;
+          for (const v of document.querySelectorAll('video')) {
+            if (v.paused || v.ended) { try { v.muted = true; v.play(); resumed++; } catch (e) {} }
+          }
+          return resumed;
+        })()
+        """
+        do {
+            _ = try await evaluateString(script, inSession: sessionId)
+            return true
+        } catch {
+            return false
+        }
     }
 
     func clickPlayButtons() async {
@@ -511,6 +567,51 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
         return data
     }
 
+    /// Fetches a binary resource by running `fetch` inside a specific child-target session (the player
+    /// iframe), so the request goes through that origin's Service Worker and inherits its anti-leech
+    /// signing. This is how Response-Relay Mode pulls the CDN's per-token segments: we can't fetch them
+    /// from the app (403) or even from the top page, but the player's own origin can. Returns nil on any
+    /// error (including a signed-but-rejected 403), so the caller can fall through cleanly.
+    func fetchBinaryResourceInSession(at url: URL, sessionId: String?, timeout: TimeInterval) async -> (data: Data?, error: String?) {
+        let script = browserFetchScript(
+            url: url,
+            timeout: timeout,
+            timeoutMessage: "segment fetch timed out",
+            fetchOptions: "{ signal: controller.signal, cache: 'no-store', credentials: 'include' }",
+            readBody: """
+            if (!response.ok) { clearTimeout(timeoutId); return "ERROR: HTTP " + response.status; }
+                const blob = await response.blob();
+                const dataURL = await new Promise((resolve, reject) => {
+                  const reader = new FileReader();
+                  reader.onloadend = () => resolve(reader.result || "");
+                  reader.onerror = () => reject(reader.error || new Error("Failed to read fetched blob"));
+                  reader.readAsDataURL(blob);
+                });
+                clearTimeout(timeoutId);
+                return dataURL;
+            """
+        )
+        let result: String?
+        do {
+            // Give the CDP round-trip a window comfortably larger than the in-page fetch's own abort
+            // timeout, so a large (multi-MB) segment body finishes transferring before the CDP call
+            // itself times out.
+            result = try await evaluateString(script, inSession: sessionId, timeout: timeout + 8)
+        } catch let PolluxError.unexpected(cdpMessage) {
+            return (nil, "evaluate: \(cdpMessage)")
+        } catch {
+            return (nil, "evaluate: \(String(describing: error))")
+        }
+        guard let result else { return (nil, "evaluate: nil result") }
+        if isBrowserFetchError(result) {
+            return (nil, String(result.prefix(80)))
+        }
+        guard let data = decodeBase64DataURL(result) else {
+            return (nil, "undecodable body (\(result.count) chars)")
+        }
+        return (data, nil)
+    }
+
     /// Fetches a network response body the browser has already buffered, by CDP request id. Used to
     /// read stream URLs directly out of API/XHR JSON responses when an anti-bot player receives its
     /// stream config over the network but never issues the media request itself — so there is no
@@ -536,12 +637,44 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
         return body
     }
 
+    /// Like `fetchResponseBody` but returns the raw bytes (not lossily decoded to a String), for
+    /// relaying binary media segments. Used by Response-Relay Mode's `MediaRelay`.
+    func fetchResponseBodyData(requestID: String, sessionId: String? = nil) async -> (data: Data, mimeType: String?)? {
+        guard
+            let dict = try? await connection.callReturningDictionary(
+                "Network.getResponseBody",
+                params: ["requestId": requestID],
+                timeout: 5.0,
+                sessionId: sessionId
+            ),
+            let body = dict["body"] as? String
+        else {
+            return nil
+        }
+        let data: Data
+        if dict["base64Encoded"] as? Bool == true {
+            guard let decoded = Data(base64Encoded: body) else {
+                return nil
+            }
+            data = decoded
+        } else {
+            data = Data(body.utf8)
+        }
+        return (data, nil)
+    }
+
+    /// Replaces the CDP event handler. Used to swap the extraction-time handler (collector + logging)
+    /// for a quiet relay-only handler once playback begins.
+    func setEventHandler(_ handler: @escaping @Sendable (String, Data, String?) async -> Void) async {
+        await connection.setEventHandler(handler)
+    }
+
     /// Silences CDP event delivery (network/console events). Extraction attaches a handler that logs
     /// and collects every network event; once we hand the live session to the playback proxy we must
     /// detach it, otherwise the running player's ongoing network traffic (plus our own proxy fetches)
     /// floods the collector and the @MainActor logger and hangs the app.
     func detachEventHandler() async {
-        await connection.setEventHandler { _, _ in }
+        await connection.setEventHandler { _, _, _ in }
     }
 
     /// True when the document has finished loading but has no player, no iframe, and no visible text —
@@ -671,6 +804,14 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
         return try cast(value, to: String.self)
     }
 
+    /// Like `evaluateString`, but runs in a specific child-target session (an out-of-process player
+    /// iframe) instead of the top page. Used to issue a `fetch` from *inside* the player's origin so it
+    /// travels through that origin's Service Worker — the one that signs the CDN's anti-leech requests.
+    func evaluateString(_ script: String, inSession sessionId: String?, timeout: TimeInterval = 10.0) async throws -> String? {
+        let value = try await evaluate(script, sessionId: sessionId, timeout: timeout)
+        return try cast(value, to: String.self)
+    }
+
     private func evaluateBool(_ script: String) async throws -> Bool {
         let value = try await evaluate(script)
         return try cast(value, to: Bool.self) ?? false
@@ -687,7 +828,7 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
         return (x, y)
     }
 
-    private func evaluate(_ script: String) async throws -> Any? {
+    private func evaluate(_ script: String, sessionId: String? = nil, timeout: TimeInterval = 10.0) async throws -> Any? {
         var params: [String: Any] = [
             "expression": script,
             "returnByValue": true,
@@ -695,10 +836,12 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
         ]
         // When mitigation is active, run in the isolated world so nothing we evaluate is visible to the
         // page's main-world code. `contextId` is omitted (default world) when no isolated world exists.
-        if let isolatedContextId {
+        // The isolated world belongs to the top target only — for a child session we run in its default
+        // world (the iframe's own context, where its Service Worker governs fetches).
+        if sessionId == nil, let isolatedContextId {
             params["contextId"] = isolatedContextId
         }
-        let result = try await connection.callReturningDictionary("Runtime.evaluate", params: params, timeout: 8.0)
+        let result = try await connection.callReturningDictionary("Runtime.evaluate", params: params, timeout: timeout, sessionId: sessionId)
 
         if let exception = result["exceptionDetails"] as? [String: Any],
            let text = exception["text"] as? String {

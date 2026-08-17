@@ -15,7 +15,7 @@ actor CDPConnection: CDPTargetConfigurable {
     private var pendingCalls: [Int: CheckedContinuation<Data, Error>] = [:]
     private var nextIdentifier = 1
     private var receiveTask: Task<Void, Never>?
-    private var eventHandler: (@Sendable (String, Data) async -> Void)?
+    private var eventHandler: (@Sendable (String, Data, String?) async -> Void)?
     private var isClosed = false
     /// Applies target setup to a freshly auto-attached child (OOPIF) session. Injected by the owning
     /// `ChromeBrowserSession` so children get the same configuration as the root. Nil until set.
@@ -24,6 +24,11 @@ actor CDPConnection: CDPTargetConfigurable {
     init(webSocketURL: URL) {
         self.session = URLSession(configuration: .ephemeral)
         self.webSocket = session.webSocketTask(with: webSocketURL)
+        // CDP replies carry response bodies inline (base64) — a `Runtime.evaluate` or `getResponseBody`
+        // that returns a media segment is easily several MB. The default 1 MB WebSocket message limit
+        // makes `receive()` throw "message too long" on those, which would otherwise kill the whole
+        // connection. Raise it well above any single segment.
+        self.webSocket.maximumMessageSize = 512 * 1024 * 1024
         self.webSocket.resume()
     }
 
@@ -70,7 +75,7 @@ actor CDPConnection: CDPTargetConfigurable {
         }
     }
 
-    func setEventHandler(_ eventHandler: @escaping @Sendable (String, Data) async -> Void) {
+    func setEventHandler(_ eventHandler: @escaping @Sendable (String, Data, String?) async -> Void) {
         self.eventHandler = eventHandler
     }
 
@@ -161,21 +166,29 @@ actor CDPConnection: CDPTargetConfigurable {
 
     private func receiveLoop() async {
         while !isClosed {
+            let message: URLSessionWebSocketTask.Message
             do {
-                let message = try await webSocket.receive()
+                message = try await webSocket.receive()
+            } catch {
+                // A `receive()` failure means the socket itself is gone — fatal.
+                if !isClosed {
+                    failAllPending(error: error)
+                }
+                return
+            }
+            do {
                 switch message {
                 case .data(let data):
                     try await handleMessage(data)
                 case .string(let string):
                     try await handleMessage(Data(string.utf8))
                 @unknown default:
-                    continue
+                    break
                 }
             } catch {
-                if !isClosed {
-                    failAllPending(error: error)
-                }
-                return
+                // A single malformed/oversized message must not kill the connection — skip and keep
+                // reading. (Fatal socket errors are handled by the receive() catch above.)
+                continue
             }
         }
     }
@@ -222,7 +235,10 @@ actor CDPConnection: CDPTargetConfigurable {
         let paramsObject = object["params"] ?? [:]
         let paramsData = try JSONSerialization.data(withJSONObject: paramsObject, options: [.fragmentsAllowed])
         if let eventHandler {
-            await eventHandler(method, paramsData)
+            // Flat-mode auto-attach delivers child-target (OOPIF) events on the same socket, tagged with
+            // the child's sessionId at the envelope top level. Pass it through so a handler can call
+            // `getResponseBody` against the right session.
+            await eventHandler(method, paramsData, object["sessionId"] as? String)
         }
     }
 

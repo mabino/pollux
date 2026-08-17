@@ -227,6 +227,52 @@ actor StreamProxyServer {
 
         let isTargetURLPlaylist = targetURL.pathExtension.lowercased() == "m3u8" || request.url.path.lowercased().hasSuffix(".m3u8")
 
+        // Response-Relay Mode: prefer the bytes the in-page player itself downloaded (captured over CDP).
+        // This defeats CDN anti-leech that rejects any fetch but the player's — we never hit the CDN.
+        // The player fetches the live window a little ahead of us, so wait briefly on a miss before
+        // falling through to the normal (usually 403) path.
+        if let relay = stream.mediaRelay {
+            if isTargetURLPlaylist {
+                // Serve the in-page player's *current media playlist* for every playlist request, so
+                // AVPlayer follows the player's exact variant + live window instead of choosing its own
+                // variant from the master (which the player never fetches). Wait briefly for the player
+                // to have produced one.
+                let deadline = Date().addingTimeInterval(5)
+                while Date() < deadline {
+                    // Prefer the synthetic growing timeline (stable, monotonic) so AVPlayer follows a
+                    // window that only advances; fall back to the player's raw snapshot until enough of
+                    // a timeline has accumulated.
+                    let synthetic = await relay.syntheticMediaPlaylist()
+                    let snapshot = synthetic == nil ? await relay.currentMediaPlaylist() : nil
+                    if let media = synthetic ?? snapshot {
+                        await relay.recordServed()
+                        return try playlistResponse(
+                            from: media.data,
+                            playlistURL: media.url,
+                            localPort: localPort,
+                            method: request.method
+                        )
+                    }
+                    try? await Task.sleep(nanoseconds: 200_000_000)
+                }
+                await relay.recordMissed(targetURL.absoluteString)
+            } else if let data = await relay.segmentData(for: targetURL.absoluteString) {
+                // Segment: the player's captured copy if cached, else fetched live through the player's
+                // iframe (SW-signed) against the CDN.
+                let response = ProxyResponse(
+                    statusCode: 200,
+                    headers: [
+                        "Content-Type": proxyContentType(for: request.url),
+                        "Content-Length": "\(data.count)",
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Access-Control-Allow-Origin": "*",
+                    ],
+                    body: request.method == "HEAD" ? Data() : data
+                )
+                return response.encoded()
+            }
+        }
+
         // Cookie-authorized streams need the browser session's page context to fetch playlists/segments
         // (the CDN rejects a direct request without the session cookie). Token-authorized streams carry
         // their auth in the URL and are fetchable directly, so the browser round-trip is pure overhead.

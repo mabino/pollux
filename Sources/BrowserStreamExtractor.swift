@@ -23,8 +23,14 @@ final class BrowserStreamExtractor: @unchecked Sendable {
 
         let profile = BrowserProfile.random()
         let collector = CaptureCollector(patterns: settings.capturePatterns, maxCandidates: settings.maxCandidates)
-        let session = try await ChromeBrowserSession.launch(profile: profile) { method, params in
+        // Response-Relay Mode: capture the player's own media responses from the start (so the master
+        // playlist, which the player fetches once, is caught), and keep feeding it during playback.
+        let relay: MediaRelay? = config.mediaRelay ? MediaRelay(streamHost: nil) : nil
+        let session = try await ChromeBrowserSession.launch(profile: profile) { method, params, sessionId in
             await collector.handleEvent(method: method, paramsData: params)
+            if let relay {
+                await relay.handleEvent(method: method, paramsData: params, sessionId: sessionId)
+            }
             // The collector above must see every event; the per-event log lines below are the noisy
             // part and are only emitted in verbose mode.
             guard verboseLogging else { return }
@@ -53,6 +59,18 @@ final class BrowserStreamExtractor: @unchecked Sendable {
         // handed its config but never issues the media request itself.
         await collector.setBodyFetcher { [session] requestID in
             await session.fetchResponseBody(requestID: requestID)
+        }
+        // The relay pulls raw bytes (segments are binary) rather than the lossy string decode, against
+        // the request's own (possibly child/OOPIF) session.
+        await relay?.setBodyFetcher { [session] requestID, sessionId in
+            await session.fetchResponseBodyData(requestID: requestID, sessionId: sessionId)
+        }
+        // On-demand segment fetch: run `fetch` inside the player's iframe session so the CDN's per-token
+        // segment request is Service-Worker-signed exactly as the player's own is. This is how we obtain
+        // segments we can never capture passively (they're served by a worker/SW we can't observe).
+        await relay?.setSegmentFetcher { [session] url, sessionId in
+            guard let parsed = safeURL(from: url) else { return (nil, "bad url") }
+            return await session.fetchBinaryResourceInSession(at: parsed, sessionId: sessionId, timeout: 15)
         }
 
         let extractionTimeout = config.extractionTimeout
@@ -111,14 +129,67 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                 }
 
                 try Task.checkCancellation()
-                onProgress?("Validating candidate with ffprobe...", 0.85)
-                ExtractionLogger.log("Validating candidates with ffprobe...")
+                if relay != nil {
+                    onProgress?("Selecting player stream...", 0.85)
+                    ExtractionLogger.log("Response-Relay Mode: selecting the player's master playlist (skipping ffprobe — the CDN blocks direct probes).")
+                } else {
+                    onProgress?("Validating candidate with ffprobe...", 0.85)
+                    ExtractionLogger.log("Validating candidates with ffprobe...")
+                }
 
-                let selection = try await self.selectBestCandidate(from: candidates, session: session, cachedPlaylists: cachedPlaylists)
+                let selection = try await self.selectBestCandidate(from: candidates, session: session, cachedPlaylists: cachedPlaylists, relayMode: relay != nil)
 
                 try Task.checkCancellation()
                 onProgress?("Preparing playback...", 0.95)
                 ExtractionLogger.log("SUCCESS: Selected stream (\(selection.kind)) at \(selection.candidate.url.absoluteString)")
+
+                if let relay {
+                    // Response-Relay Mode: keep the player alive and playing, and swap the noisy
+                    // extraction handler for a quiet relay-only one that keeps mirroring the player's
+                    // live media responses. The browser is intentionally NOT released here.
+                    await relay.setStreamHost(selection.candidate.url.host)
+                    await session.setEventHandler { method, params, sessionId in
+                        await relay.handleEvent(method: method, paramsData: params, sessionId: sessionId)
+                    }
+                    // Nudge the player into actually playing so it keeps fetching the live window (which
+                    // is what the relay serves). A viewport click via the Input domain reaches the
+                    // cross-origin player iframe; JS play() on any top-frame <video> is a harmless extra.
+                    try? await session.click(x: profile.centerX, y: profile.centerY)
+                    await session.clickPlayButtons()
+                    ExtractionLogger.log("Response-Relay Mode active: serving the player's captured media. Keeping the in-page player alive to feed the live window.")
+                    // Keep-alive loop: a live stream only advances while the in-page player keeps playing
+                    // and pulling new segments (which the relay mirrors). Every 3s, re-assert playback by
+                    // resuming any paused <video> in the player's own session; log a lightweight relay
+                    // heartbeat every ~30s. Exit cleanly once the browser is gone (the nudge fails).
+                    Task.detached {
+                        var idleFailures = 0
+                        var tick = 0
+                        while idleFailures < 5 {
+                            try? await Task.sleep(nanoseconds: 3_000_000_000)
+                            if let playerSession = await relay.playerSession() {
+                                let alive = await session.resumePausedVideos(inSession: playerSession)
+                                idleFailures = alive ? 0 : idleFailures + 1
+                            }
+                            if tick % 10 == 0 {
+                                let line = await relay.statsLine()
+                                ExtractionLogger.log(line)
+                            }
+                            tick += 1
+                        }
+                    }
+                    return ExtractedStream(
+                        sourcePageURL: sourcePageURL,
+                        streamURL: selection.candidate.url,
+                        headers: selection.candidate.headers,
+                        kind: selection.kind,
+                        cachedPlaylists: cachedPlaylists,
+                        excludedVariantURLs: selection.excludedVariantURLs,
+                        notice: selection.notice,
+                        cookies: cookies,
+                        session: session,
+                        mediaRelay: relay
+                    )
+                }
 
                 // Stop collecting/logging CDP events before playback begins. The session normally
                 // stays alive for live playlist refresh, but the running player would otherwise flood
@@ -374,8 +445,27 @@ final class BrowserStreamExtractor: @unchecked Sendable {
     private func selectBestCandidate(
         from candidates: [StreamCandidate],
         session: ChromeBrowserSession,
-        cachedPlaylists: [String: String]
+        cachedPlaylists: [String: String],
+        relayMode: Bool = false
     ) async throws -> CandidateSelection {
+        // Response-Relay Mode serves the in-page player's own captured bytes, never the CDN directly.
+        // ffprobe validates a candidate by fetching it directly — exactly what the CDN anti-leech 403s —
+        // so probing here is both meaningless (we won't fetch that way) and a hang risk (a blocked probe
+        // stalls until the watchdog fires). Skip it and take the master playlist the player is using.
+        if relayMode {
+            if let master = bestMasterPlaylistCandidate(from: candidates, cachedPlaylists: cachedPlaylists) {
+                return CandidateSelection(candidate: master, kind: .hls, excludedVariantURLs: [], notice: nil)
+            }
+            let hls = candidates.filter { $0.kind == .hls }
+            let pool = hls.isEmpty ? candidates : hls
+            if let best = pool.sorted(by: { lhs, rhs in
+                isBetterCandidate(scoreL: lhs.score, urlL: lhs.url.absoluteString, scoreR: rhs.score, urlR: rhs.url.absoluteString)
+            }).first {
+                return CandidateSelection(candidate: best, kind: best.kind, excludedVariantURLs: [], notice: nil)
+            }
+            throw PolluxError.noPlayableStream
+        }
+
         let prober = try FFprobeService()
 
         // Probe only playable entry points — playlists and whole-file streams — not individual media
@@ -586,12 +676,14 @@ struct ResolvedRunConfig {
     let verboseLogging: Bool
     let extractionTimeout: TimeInterval
     let releaseBrowserAfterExtraction: Bool
+    let mediaRelay: Bool
 
     static func resolved(from defaults: UserDefaults = .standard) -> ResolvedRunConfig {
         ResolvedRunConfig(
             verboseLogging: defaults.bool(forKey: PolluxPreferences.verboseExtractionLoggingKey),
             extractionTimeout: CaptureRetryBudget.resolved(from: defaults),
-            releaseBrowserAfterExtraction: defaults.bool(forKey: PolluxPreferences.releaseBrowserAfterExtractionKey)
+            releaseBrowserAfterExtraction: defaults.bool(forKey: PolluxPreferences.releaseBrowserAfterExtractionKey),
+            mediaRelay: defaults.bool(forKey: PolluxPreferences.mediaRelayKey)
         )
     }
 }

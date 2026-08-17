@@ -846,6 +846,55 @@ final class PolluxTests: XCTestCase {
         XCTAssertTrue(StreamLibraryStore(userDefaults: defaults).records.isEmpty)
     }
 
+    // MARK: - Response-Relay Mode
+
+    func testMediaRelayCapturesPlayerMediaAndEvictsOldSegments() async throws {
+        let relay = MediaRelay(streamHost: "cdn.example", maxSegments: 2, maxTotalSegmentBytes: 1_000_000)
+        await relay.setBodyFetcher { requestID, _ in
+            if requestID.hasPrefix("pl") {
+                return (Data("#EXTM3U\n#EXT-X-VERSION:3\nseg.ts".utf8), "application/vnd.apple.mpegurl")
+            }
+            return (Data(repeating: 0xAB, count: 188), "video/mp2t")
+        }
+
+        func feed(_ requestID: String, _ url: String, _ mime: String) async {
+            let resp = try! JSONSerialization.data(withJSONObject: [
+                "requestId": requestID,
+                "response": ["url": url, "mimeType": mime, "status": 200],
+            ])
+            await relay.handleEvent(method: "Network.responseReceived", paramsData: resp, sessionId: nil)
+            let fin = try! JSONSerialization.data(withJSONObject: ["requestId": requestID])
+            await relay.handleEvent(method: "Network.loadingFinished", paramsData: fin, sessionId: nil)
+        }
+
+        await feed("pl1", "https://cdn.example/index.m3u8", "application/vnd.apple.mpegurl")
+        let playlist = await relay.waitForBody(for: "https://cdn.example/index.m3u8", timeout: 1)
+        XCTAssertEqual(playlist?.isPlaylist, true)
+        XCTAssertTrue(String(decoding: playlist!.data, as: UTF8.self).contains("#EXTM3U"))
+
+        // Three segments with a cap of 2 → the oldest is evicted; the playlist is never evicted.
+        await feed("s1", "https://cdn.example/1.ts", "video/mp2t")
+        _ = await relay.waitForBody(for: "https://cdn.example/1.ts", timeout: 1)
+        await feed("s2", "https://cdn.example/2.ts", "video/mp2t")
+        _ = await relay.waitForBody(for: "https://cdn.example/2.ts", timeout: 1)
+        await feed("s3", "https://cdn.example/3.ts", "video/mp2t")
+        _ = await relay.waitForBody(for: "https://cdn.example/3.ts", timeout: 1)
+
+        let s1 = await relay.body(for: "https://cdn.example/1.ts")
+        let s2 = await relay.body(for: "https://cdn.example/2.ts")
+        let s3 = await relay.body(for: "https://cdn.example/3.ts")
+        XCTAssertNil(s1, "oldest segment should be evicted")
+        XCTAssertEqual(s2?.data.count, 188)
+        XCTAssertNotNil(s3)
+        let survivingPlaylist = await relay.body(for: "https://cdn.example/index.m3u8")
+        XCTAssertNotNil(survivingPlaylist, "playlist should survive eviction")
+
+        // Off-host, non-media responses are ignored.
+        await feed("x1", "https://ads.example/pixel.gif", "image/gif")
+        let ignored = await relay.waitForBody(for: "https://ads.example/pixel.gif", timeout: 0.3)
+        XCTAssertNil(ignored)
+    }
+
     @MainActor
     func testStreamLibraryRetentionLimitCapsAndEnforces() throws {
         let suite = "pollux.test.retention.\(UUID().uuidString)"
@@ -878,6 +927,40 @@ final class PolluxTests: XCTestCase {
         // With retention None (0), adds are not retained.
         store.add(record(99))
         XCTAssertTrue(store.records.isEmpty)
+    }
+
+    // MARK: - Response-Relay synthetic timeline
+
+    func testSyntheticMediaPlaylistBuildsMonotonicGrowingTimeline() async throws {
+        let relay = MediaRelay(streamHost: "cdn.example.com")
+        let base = URL(string: "https://cdn.example.com/live/high/mono.m3u8")!
+
+        func mediaPlaylist(sequence: Int, segments: [Int]) -> Data {
+            var lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:4", "#EXT-X-MEDIA-SEQUENCE:\(sequence)"]
+            for n in segments {
+                lines.append("#EXTINF:4.000,")
+                lines.append("https://worker.example.com/p/seg\(n).ts")
+            }
+            return Data((lines.joined(separator: "\n") + "\n").utf8)
+        }
+
+        // Two overlapping live snapshots: the window slides forward by one segment.
+        await relay.recordMediaTimeline(fromMediaPlaylist: mediaPlaylist(sequence: 10, segments: [10, 11, 12]), playlistURL: base)
+        await relay.recordMediaTimeline(fromMediaPlaylist: mediaPlaylist(sequence: 11, segments: [11, 12, 13]), playlistURL: base)
+
+        let playlist = await relay.syntheticMediaPlaylist()
+        let text = try XCTUnwrap(playlist.map { String(decoding: $0.data, as: UTF8.self) })
+
+        // Union of unique segments, in first-seen order — no duplicates from the overlap.
+        let segmentLines = text.split(separator: "\n").filter { $0.hasPrefix("https://worker.example.com/p/seg") }
+        XCTAssertEqual(segmentLines, ["https://worker.example.com/p/seg10.ts",
+                                      "https://worker.example.com/p/seg11.ts",
+                                      "https://worker.example.com/p/seg12.ts",
+                                      "https://worker.example.com/p/seg13.ts"])
+        // Growing playlist: anchored at the first segment we ever saw, no ENDLIST (stays live).
+        XCTAssertTrue(text.contains("#EXT-X-MEDIA-SEQUENCE:0"))
+        XCTAssertFalse(text.contains("#EXT-X-ENDLIST"))
+        XCTAssertTrue(text.contains("#EXTINF:4.000,"))
     }
 
 }

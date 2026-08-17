@@ -13,6 +13,7 @@ struct SettingsView: View {
     @AppStorage(PolluxPreferences.releaseBrowserAfterExtractionKey) private var releaseBrowserAfterExtraction = false
     @AppStorage(PolluxPreferences.antiAutomationLevelKey) private var antiAutomationLevel = AntiAutomationLevel.off.rawValue
     @AppStorage(PolluxPreferences.streamLibraryRetentionKey) private var streamLibraryRetention = StreamLibraryStore.defaultRetention
+    @AppStorage(PolluxPreferences.mediaRelayKey) private var mediaRelay = false
     @State private var selectionError: String?
 
     var body: some View {
@@ -106,6 +107,16 @@ struct SettingsView: View {
                     Toggle("Close browser after extraction", isOn: $releaseBrowserAfterExtraction)
 
                     Text("Frees the Chromium instance as soon as a stream is found, reducing memory use. Live streams then refresh over direct connections only (no browser fallback), which some CDNs reject — leave off if live playback stalls after a few seconds.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 4)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("Relay player media (experimental)", isOn: $mediaRelay)
+
+                    Text("For sites whose CDN rejects every request except the in-page player's, keep the (visible) browser playing and serve the player's own downloaded video to Pollux. This forces a visible browser and keeps it running for the whole session — expect higher CPU and memory, and playback that trails the browser by a few seconds. Try Standard anti-automation too if the browser itself can't load the stream.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

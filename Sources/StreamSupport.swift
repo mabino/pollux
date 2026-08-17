@@ -277,6 +277,9 @@ struct ExtractedStream: Sendable {
     /// Cookie header) so a stream can be persisted and recalled later — see `StreamRecord`.
     let cookies: [BrowserCookie]
     let session: BrowserSession?
+    /// Response-Relay Mode: the player's captured media bytes, which the proxy serves in preference to
+    /// re-fetching from the CDN. Transient (not persisted; a recalled record has no relay).
+    let mediaRelay: MediaRelay?
 
     init(
         sourcePageURL: URL,
@@ -287,7 +290,8 @@ struct ExtractedStream: Sendable {
         excludedVariantURLs: Set<String> = [],
         notice: String?,
         cookies: [BrowserCookie] = [],
-        session: BrowserSession? = nil
+        session: BrowserSession? = nil,
+        mediaRelay: MediaRelay? = nil
     ) {
         self.sourcePageURL = sourcePageURL
         self.streamURL = streamURL
@@ -298,6 +302,7 @@ struct ExtractedStream: Sendable {
         self.notice = notice
         self.cookies = cookies
         self.session = session
+        self.mediaRelay = mediaRelay
     }
 }
 
@@ -393,6 +398,9 @@ enum PolluxPreferences {
     static let streamLibraryKey = "pollux.streamLibrary"
     /// How many previous streams to retain (0, 5, 20, or 50; default 20). Backs the Settings picker.
     static let streamLibraryRetentionKey = "pollux.streamLibraryRetention"
+    /// Response-Relay Mode (experimental): keep the extraction browser alive and playing, and serve the
+    /// player's own captured media bytes to AVPlayer instead of re-fetching from the CDN. Off by default.
+    static let mediaRelayKey = "pollux.mediaRelay"
     /// Launch the extraction browser with a visible (headful) window instead of headless. Some sites
     /// detect headless Chromium and serve a black/blocked page; a real window can bypass that.
     static let headfulExtractionKey = "pollux.headfulExtraction"

@@ -4,3 +4,5 @@ DerivedData/
 *.profraw
 *.xcodeproj/project.xcworkspace/
 *.xcodeproj/xcuserdata/
+build/
+DerivedData/

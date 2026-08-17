@@ -39,9 +39,11 @@
 		96C4241B2CE6E31C7850E667 /* StreamLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1792766129C99E1B89A44156 /* StreamLibrary.swift */; };
 		98FF772BCF1A0F61D2CBAD22 /* StreamSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977ADF7E6066D6815495C684 /* StreamSupport.swift */; };
 		9C5FE401898A811CBEA3FE16 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 7F5291663FCF603190DD179F /* Sparkle */; };
+		B14C8C830C6868E5BE69CC67 /* MediaRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18465BFDF6F1B1E611E9EFDD /* MediaRelay.swift */; };
 		BB25FFA94D693842CA9B79C1 /* AVPlayerViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFF11F262B703FDD428E65B2 /* AVPlayerViewContainer.swift */; };
 		C4600ECD6103C84C26C73432 /* BrowserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC90589CFD64C91BF827BC7D /* BrowserProfile.swift */; };
 		C7CD6CBABDEFE48E434B6ACD /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63C53E2715FC9D52E9BF14B4 /* MainWindowView.swift */; };
+		C9DDAECA84AB1859149B7B8F /* MediaRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18465BFDF6F1B1E611E9EFDD /* MediaRelay.swift */; };
 		CAFE9693B3667491E54C0C76 /* PolluxTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050852061A287A26D1564790 /* PolluxTests.swift */; };
 		CBDB25FDE9D5499FD078CDC6 /* InteractionPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2893CEABE104DCED1DC487 /* InteractionPipeline.swift */; };
 		CF6E395781D422E2A1C9D783 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98502FCB03279E79D971D577 /* main.swift */; };
@@ -70,6 +72,7 @@
 		119F4ED4D5EED5C04EFE1F95 /* PolluxAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolluxAppModel.swift; sourceTree = "<group>"; };
 		12D981465B752B8448E0DECF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		1792766129C99E1B89A44156 /* StreamLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamLibrary.swift; sourceTree = "<group>"; };
+		18465BFDF6F1B1E611E9EFDD /* MediaRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaRelay.swift; sourceTree = "<group>"; };
 		34B081E6597C0E8CAEF26C74 /* ExtractionLogWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtractionLogWindowView.swift; sourceTree = "<group>"; };
 		49EFE3C36226667429DE36D9 /* UpdaterViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterViewModel.swift; sourceTree = "<group>"; };
 		4B7CD110198385718C925B5F /* FFprobeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FFprobeService.swift; sourceTree = "<group>"; };
@@ -163,6 +166,7 @@
 				4B7CD110198385718C925B5F /* FFprobeService.swift */,
 				AC2893CEABE104DCED1DC487 /* InteractionPipeline.swift */,
 				63C53E2715FC9D52E9BF14B4 /* MainWindowView.swift */,
+				18465BFDF6F1B1E611E9EFDD /* MediaRelay.swift */,
 				0E105AF20DC3B479C6EDE167 /* NetworkInterface.swift */,
 				D1CB44B02D64E9B46786BE2F /* PermissionsRequiredView.swift */,
 				D970E5A08CE26A55EEF0BDDC /* PermissionSupport.swift */,
@@ -314,6 +318,7 @@
 				64C021061D87A8B3CC445542 /* FFprobeService.swift in Sources */,
 				CBDB25FDE9D5499FD078CDC6 /* InteractionPipeline.swift in Sources */,
 				C7CD6CBABDEFE48E434B6ACD /* MainWindowView.swift in Sources */,
+				B14C8C830C6868E5BE69CC67 /* MediaRelay.swift in Sources */,
 				5FF995E11F0DC463EA2B297A /* NetworkInterface.swift in Sources */,
 				51A34130206DBBBC802F2773 /* PermissionSupport.swift in Sources */,
 				0A849BF3F3E3EA9DA2BDAFE7 /* PermissionsRequiredView.swift in Sources */,
@@ -345,6 +350,7 @@
 				2E6CF346FE76EB36D553C302 /* ExtractionLogger.swift in Sources */,
 				40222335A4D49EF7B9E6E45E /* FFprobeService.swift in Sources */,
 				F380550AB01BE76A249890B6 /* InteractionPipeline.swift in Sources */,
+				C9DDAECA84AB1859149B7B8F /* MediaRelay.swift in Sources */,
 				23FD6FB5778D81B75C07DB6A /* NetworkInterface.swift in Sources */,
 				D0BC41D3C6DCD17B151800C1 /* PermissionSupport.swift in Sources */,
 				463ECEFEC430BB6191418CC4 /* StreamProxyServer.swift in Sources */,
@@ -457,7 +463,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -481,7 +487,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.4.0;
+				MARKETING_VERSION = 0.5.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -546,7 +552,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 4;
+				CURRENT_PROJECT_VERSION = 5;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -564,7 +570,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.4.0;
+				MARKETING_VERSION = 0.5.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
