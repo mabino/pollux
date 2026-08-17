@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(log show *)",
+      "Bash(/usr/bin/log show *)"
+    ]
+  }
+}

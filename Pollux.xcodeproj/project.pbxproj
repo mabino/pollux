@@ -31,10 +31,12 @@
 		64C021061D87A8B3CC445542 /* FFprobeService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B7CD110198385718C925B5F /* FFprobeService.swift */; };
 		686C17841F9279AF6F5FCA30 /* SupportViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6AF7D04B080E5CF53029ADE /* SupportViews.swift */; };
 		7C1A26A355A1A3C32B58C447 /* SparkleUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA2112C26DA0A3AD9A86B788 /* SparkleUpdater.swift */; };
+		7C1C11BFFCE700E4CCF6FD7B /* PreviousStreamsWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84C65A90CF41AAC6A689D10D /* PreviousStreamsWindowView.swift */; };
 		7DD5D0BF1036E0A727A4708D /* RecentStreams.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE15163C89EF31355DBA4A86 /* RecentStreams.swift */; };
 		7DD92972461D822DC9BF1BBB /* BrowserProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC90589CFD64C91BF827BC7D /* BrowserProfile.swift */; };
 		85172557BCE023615EE89E17 /* StreamInfoWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DE8B910F999C456FB54C747 /* StreamInfoWindowView.swift */; };
 		95C409891AC08CC5514A99B8 /* CDPConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F817371E8EB6BC76F2AC790 /* CDPConnection.swift */; };
+		96C4241B2CE6E31C7850E667 /* StreamLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1792766129C99E1B89A44156 /* StreamLibrary.swift */; };
 		98FF772BCF1A0F61D2CBAD22 /* StreamSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977ADF7E6066D6815495C684 /* StreamSupport.swift */; };
 		9C5FE401898A811CBEA3FE16 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 7F5291663FCF603190DD179F /* Sparkle */; };
 		BB25FFA94D693842CA9B79C1 /* AVPlayerViewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFF11F262B703FDD428E65B2 /* AVPlayerViewContainer.swift */; };
@@ -67,6 +69,7 @@
 		0F817371E8EB6BC76F2AC790 /* CDPConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CDPConnection.swift; sourceTree = "<group>"; };
 		119F4ED4D5EED5C04EFE1F95 /* PolluxAppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PolluxAppModel.swift; sourceTree = "<group>"; };
 		12D981465B752B8448E0DECF /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		1792766129C99E1B89A44156 /* StreamLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamLibrary.swift; sourceTree = "<group>"; };
 		34B081E6597C0E8CAEF26C74 /* ExtractionLogWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtractionLogWindowView.swift; sourceTree = "<group>"; };
 		49EFE3C36226667429DE36D9 /* UpdaterViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdaterViewModel.swift; sourceTree = "<group>"; };
 		4B7CD110198385718C925B5F /* FFprobeService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FFprobeService.swift; sourceTree = "<group>"; };
@@ -79,6 +82,7 @@
 		6F9DCE7059DDE7EEA0CDF901 /* PlayerWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerWindowView.swift; sourceTree = "<group>"; };
 		7DB2106D50BF65B7876E39DF /* Pollux.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pollux.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		83A94E2CC30C8E740E332767 /* PolluxTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PolluxTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		84C65A90CF41AAC6A689D10D /* PreviousStreamsWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviousStreamsWindowView.swift; sourceTree = "<group>"; };
 		90D427DC4E27C57F174AC9BE /* ErrorWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorWindowView.swift; sourceTree = "<group>"; };
 		977ADF7E6066D6815495C684 /* StreamSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamSupport.swift; sourceTree = "<group>"; };
 		98502FCB03279E79D971D577 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
@@ -165,10 +169,12 @@
 				6F9DCE7059DDE7EEA0CDF901 /* PlayerWindowView.swift */,
 				EC2F5AC0710188F958CCFA9F /* PolluxApp.swift */,
 				119F4ED4D5EED5C04EFE1F95 /* PolluxAppModel.swift */,
+				84C65A90CF41AAC6A689D10D /* PreviousStreamsWindowView.swift */,
 				DE15163C89EF31355DBA4A86 /* RecentStreams.swift */,
 				12D981465B752B8448E0DECF /* SettingsView.swift */,
 				AA2112C26DA0A3AD9A86B788 /* SparkleUpdater.swift */,
 				6DE8B910F999C456FB54C747 /* StreamInfoWindowView.swift */,
+				1792766129C99E1B89A44156 /* StreamLibrary.swift */,
 				6E9123BDEDE3CC75926D4C0B /* StreamProxyServer.swift */,
 				977ADF7E6066D6815495C684 /* StreamSupport.swift */,
 				E6AF7D04B080E5CF53029ADE /* SupportViews.swift */,
@@ -314,10 +320,12 @@
 				2EEB7DA6701596CB78D418B6 /* PlayerWindowView.swift in Sources */,
 				5CB90FB0972A6DCA5233FE11 /* PolluxApp.swift in Sources */,
 				554C1B49F02CB39124CD13EF /* PolluxAppModel.swift in Sources */,
+				7C1C11BFFCE700E4CCF6FD7B /* PreviousStreamsWindowView.swift in Sources */,
 				7DD5D0BF1036E0A727A4708D /* RecentStreams.swift in Sources */,
 				1B03CE0885F9A5C121E6D377 /* SettingsView.swift in Sources */,
 				7C1A26A355A1A3C32B58C447 /* SparkleUpdater.swift in Sources */,
 				85172557BCE023615EE89E17 /* StreamInfoWindowView.swift in Sources */,
+				96C4241B2CE6E31C7850E667 /* StreamLibrary.swift in Sources */,
 				EA65FB4FBE89FAFC7194192A /* StreamProxyServer.swift in Sources */,
 				3BFE022FF6F207E34A35CB82 /* StreamSupport.swift in Sources */,
 				686C17841F9279AF6F5FCA30 /* SupportViews.swift in Sources */,
@@ -449,7 +457,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -473,7 +481,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.0;
+				MARKETING_VERSION = 0.4.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -538,7 +546,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -556,7 +564,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 0.3.0;
+				MARKETING_VERSION = 0.4.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";

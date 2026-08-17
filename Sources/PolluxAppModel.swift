@@ -9,6 +9,7 @@ final class PolluxAppModel: ObservableObject {
     static let infoWindowID = "pollux-info-window"
     static let logWindowID = "pollux-log-window"
     static let errorWindowID = "pollux-error-window"
+    static let previousStreamsWindowID = "pollux-previous-streams-window"
 
     @Published var pageURLString: String
     @Published var isExtracting = false
@@ -124,9 +125,41 @@ final class PolluxAppModel: ObservableObject {
             extractionProgress = 1.0
             extractionPhase = "Starting playback..."
             try await installPlayback(for: extracted)
+            // Snapshot the successful extraction so it can later be recalled and fast-path-played
+            // without relaunching Chromium (see `playRecord`).
+            StreamLibraryStore.shared.add(extracted.makeRecord())
             return true
         } catch is CancellationError {
             return false
+        } catch let error as PolluxError {
+            lastError = error.userFacing
+            return false
+        } catch {
+            lastError = PolluxError.unexpected(error.localizedDescription).userFacing
+            return false
+        }
+    }
+
+    /// Fast path: resume playback from a previously saved library record without launching Chromium.
+    /// Plays over direct connections using the record's stored headers and cookies, so it succeeds only
+    /// while those remain valid. Returns false (and sets `lastError`) if the record can't be rebuilt or
+    /// playback fails.
+    func playRecord(_ record: StreamRecord) async -> Bool {
+        cancelExtraction()
+        lastError = nil
+        playbackError = nil
+        playbackNotice = nil
+
+        guard let extracted = record.makeExtractedStream() else {
+            lastError = PolluxError.invalidURL(record.streamURL).userFacing
+            return false
+        }
+
+        do {
+            try await installPlayback(for: extracted)
+            // Refresh recency so a replayed stream moves to the top of the library.
+            StreamLibraryStore.shared.add(record)
+            return true
         } catch let error as PolluxError {
             lastError = error.userFacing
             return false

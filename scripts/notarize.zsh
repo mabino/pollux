@@ -30,6 +30,27 @@ xcodebuild "${reply[@]}" \
   archive -quiet
 
 APP_PATH="$ARCHIVE_PATH/Products/Applications/Pollux.app"
+
+# Re-sign Sparkle's nested helper code with the Developer ID cert, hardened runtime, and a secure
+# timestamp. `xcodebuild archive` signs the app and the framework's top level but leaves these nested
+# bundles with Sparkle's own signature, which notarization rejects. Sign inside-out, then re-seal the
+# framework and the app.
+SPARKLE_VERSION_DIR="$APP_PATH/Contents/Frameworks/Sparkle.framework/Versions/B"
+if [[ -d "$SPARKLE_VERSION_DIR" ]]; then
+  for nested in \
+    "$SPARKLE_VERSION_DIR/XPCServices/Downloader.xpc" \
+    "$SPARKLE_VERSION_DIR/XPCServices/Installer.xpc" \
+    "$SPARKLE_VERSION_DIR/Updater.app" \
+    "$SPARKLE_VERSION_DIR/Autoupdate"; do
+    [[ -e "$nested" ]] && codesign --force --options runtime --timestamp \
+      --sign "$POLLUX_DEVELOPER_ID_APP" "$nested"
+  done
+  codesign --force --options runtime --timestamp \
+    --sign "$POLLUX_DEVELOPER_ID_APP" "$APP_PATH/Contents/Frameworks/Sparkle.framework"
+  codesign --force --options runtime --timestamp \
+    --sign "$POLLUX_DEVELOPER_ID_APP" "$APP_PATH"
+fi
+
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
 
 if [[ -n "${POLLUX_NOTARY_KEYCHAIN_PROFILE:-}" ]]; then

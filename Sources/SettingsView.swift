@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage(PolluxPreferences.headfulExtractionKey) private var headfulExtraction = false
     @AppStorage(PolluxPreferences.releaseBrowserAfterExtractionKey) private var releaseBrowserAfterExtraction = false
     @AppStorage(PolluxPreferences.antiAutomationLevelKey) private var antiAutomationLevel = AntiAutomationLevel.off.rawValue
+    @AppStorage(PolluxPreferences.streamLibraryRetentionKey) private var streamLibraryRetention = StreamLibraryStore.defaultRetention
     @State private var selectionError: String?
 
     var body: some View {
@@ -105,6 +106,27 @@ struct SettingsView: View {
                     Toggle("Close browser after extraction", isOn: $releaseBrowserAfterExtraction)
 
                     Text("Frees the Chromium instance as soon as a stream is found, reducing memory use. Live streams then refresh over direct connections only (no browser fallback), which some CDNs reject — leave off if live playback stalls after a few seconds.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 4)
+            }
+
+            Section("Previous Streams") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Picker("Streams to remember", selection: $streamLibraryRetention) {
+                        Text("None").tag(0)
+                        Text("5").tag(5)
+                        Text("20").tag(20)
+                        Text("50").tag(50)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: streamLibraryRetention) { _, _ in
+                        StreamLibraryStore.shared.enforceRetentionLimit()
+                    }
+
+                    Text("How many previously extracted streams Pollux keeps in the Previous Streams window, so you can resume one without re-running extraction. \"None\" disables the history. Stored entries include the captured request headers and cookies.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

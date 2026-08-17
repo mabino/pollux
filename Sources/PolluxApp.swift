@@ -48,6 +48,12 @@ struct PolluxApp: App {
                 .environmentObject(model)
         }
         .defaultSize(width: 700, height: 450)
+
+        Window("Previous Streams", id: PolluxAppModel.previousStreamsWindowID) {
+            PreviousStreamsWindowView()
+                .environmentObject(model)
+        }
+        .defaultSize(width: 620, height: 420)
     }
 }
 
@@ -96,6 +102,11 @@ struct PolluxCommands: Commands {
         }
 
         CommandGroup(after: .windowArrangement) {
+            Button("Previous Streams") {
+                openWindow(id: PolluxAppModel.previousStreamsWindowID)
+            }
+            .keyboardShortcut("p", modifiers: [.command, .option])
+
             Button("Extraction Log") {
                 openWindow(id: PolluxAppModel.logWindowID)
             }

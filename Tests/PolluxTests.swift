@@ -774,6 +774,112 @@ final class PolluxTests: XCTestCase {
         XCTAssertEqual(childStealth, profile.stealthScript)
     }
 
+    // MARK: - Stream library (fast-path recall)
+
+    func testStreamRecordRoundTripsThroughJSONAndBackToExtractedStream() throws {
+        let source = try XCTUnwrap(URL(string: "https://example.com/watch/123"))
+        let stream = try XCTUnwrap(URL(string: "https://cdn.example/token-abc/master.m3u8"))
+        let original = ExtractedStream(
+            sourcePageURL: source,
+            streamURL: stream,
+            headers: ["Referer": "https://embed.example/", "Cookie": "sid=xyz"],
+            kind: .hls,
+            cachedPlaylists: [stream.absoluteString: "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nvar.m3u8"],
+            excludedVariantURLs: ["https://cdn.example/token-abc/low.m3u8"],
+            notice: "a notice",
+            cookies: [BrowserCookie(name: "sid", value: "xyz", domain: ".example")],
+            session: nil
+        )
+
+        let record = original.makeRecord(id: UUID(), createdAt: Date(timeIntervalSince1970: 1000))
+        // Survives a JSON round-trip (this is how the library persists it).
+        let data = try JSONEncoder().encode(record)
+        let decoded = try JSONDecoder().decode(StreamRecord.self, from: data)
+        XCTAssertEqual(decoded, record)
+
+        // Rebuilds into a playable stream with the browser session dropped.
+        let rebuilt = try XCTUnwrap(decoded.makeExtractedStream())
+        XCTAssertEqual(rebuilt.sourcePageURL, source)
+        XCTAssertEqual(rebuilt.streamURL, stream)
+        XCTAssertEqual(rebuilt.kind, .hls)
+        XCTAssertEqual(rebuilt.headers, original.headers)
+        XCTAssertEqual(rebuilt.cookies, original.cookies)
+        XCTAssertEqual(rebuilt.cachedPlaylists, original.cachedPlaylists)
+        XCTAssertEqual(rebuilt.excludedVariantURLs, original.excludedVariantURLs)
+        XCTAssertNil(rebuilt.session)
+    }
+
+    @MainActor
+    func testStreamLibraryStoreAddsDedupesAndPersists() throws {
+        let suite = "pollux.test.library.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        func record(_ streamURL: String) -> StreamRecord {
+            StreamRecord(
+                id: UUID(), createdAt: Date(), sourcePageURL: "https://example.com/watch",
+                streamURL: streamURL, kind: .hls, headers: [:], cookies: [],
+                cachedPlaylists: [:], excludedVariantURLs: [], notice: nil
+            )
+        }
+
+        let store = StreamLibraryStore(userDefaults: defaults)
+        XCTAssertTrue(store.records.isEmpty)
+
+        store.add(record("https://cdn.example/a/master.m3u8"))
+        store.add(record("https://cdn.example/b/master.m3u8"))
+        // Most-recent-first.
+        XCTAssertEqual(store.records.map(\.streamURL),
+                       ["https://cdn.example/b/master.m3u8", "https://cdn.example/a/master.m3u8"])
+
+        // Re-adding an existing stream URL de-dupes and moves it to the front.
+        store.add(record("https://cdn.example/a/master.m3u8"))
+        XCTAssertEqual(store.records.count, 2)
+        XCTAssertEqual(store.records.first?.streamURL, "https://cdn.example/a/master.m3u8")
+
+        // Persists across store instances backed by the same defaults.
+        let reloaded = StreamLibraryStore(userDefaults: defaults)
+        XCTAssertEqual(reloaded.records.map(\.streamURL), store.records.map(\.streamURL))
+        XCTAssertNotNil(reloaded.record(forStreamURL: "https://cdn.example/a/master.m3u8"))
+
+        reloaded.clear()
+        XCTAssertTrue(StreamLibraryStore(userDefaults: defaults).records.isEmpty)
+    }
+
+    @MainActor
+    func testStreamLibraryRetentionLimitCapsAndEnforces() throws {
+        let suite = "pollux.test.retention.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        func record(_ i: Int) -> StreamRecord {
+            StreamRecord(
+                id: UUID(), createdAt: Date(), sourcePageURL: "https://example.com/watch",
+                streamURL: "https://cdn.example/\(i)/master.m3u8", kind: .hls, headers: [:],
+                cookies: [], cachedPlaylists: [:], excludedVariantURLs: [], notice: nil
+            )
+        }
+
+        // Default retention (unset) is 20.
+        let store = StreamLibraryStore(userDefaults: defaults)
+        XCTAssertEqual(store.retentionLimit, 20)
+
+        // Cap at 5.
+        defaults.set(5, forKey: PolluxPreferences.streamLibraryRetentionKey)
+        for i in 0..<8 { store.add(record(i)) }
+        XCTAssertEqual(store.records.count, 5)
+        XCTAssertEqual(store.records.first?.streamURL, "https://cdn.example/7/master.m3u8")
+
+        // Lowering the limit and enforcing trims immediately.
+        defaults.set(0, forKey: PolluxPreferences.streamLibraryRetentionKey)
+        store.enforceRetentionLimit()
+        XCTAssertTrue(store.records.isEmpty)
+
+        // With retention None (0), adds are not retained.
+        store.add(record(99))
+        XCTAssertTrue(store.records.isEmpty)
+    }
+
 }
 
 /// Records `close()` calls so tests can assert the proxy's session ownership semantics without

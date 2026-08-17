@@ -12,8 +12,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: 5.10
-    MARKETING_VERSION: 0.3.0
-    CURRENT_PROJECT_VERSION: 3
+    MARKETING_VERSION: 0.4.0
+    CURRENT_PROJECT_VERSION: 4
     CODE_SIGN_STYLE: Automatic
     GENERATE_INFOPLIST_FILE: YES
     ENABLE_HARDENED_RUNTIME: YES
@@ -78,6 +78,8 @@ targets:
           - "PolluxAppModel.swift"
           - "ErrorWindowView.swift"
           - "RecentStreams.swift"
+          - "StreamLibrary.swift"
+          - "PreviousStreamsWindowView.swift"
           - "SparkleUpdater.swift"
           - "UpdaterViewModel.swift"
     settings:

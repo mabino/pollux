@@ -347,7 +347,12 @@ actor StreamProxyServer {
         // the cached response keep the player polling, so it can recover as soon as a later reload
         // succeeds.
         let finalStatus = httpResponse?.statusCode ?? 0
-        let cachedCopy = stream.cachedPlaylists[targetURL.absoluteString]
+        // Only fall back to a cached copy that is an actual playlist. Guarding here as well as at the
+        // caching step means a stale HTML error page can never be served as bogus segments — the player
+        // gets the honest upstream failure and can retry, rather than spinning on garbage forever.
+        let cachedCopy = stream.cachedPlaylists[targetURL.absoluteString].flatMap {
+            looksLikeHLSPlaylistText($0) ? $0 : nil
+        }
         if shouldServeCachedManifestOnUpstreamFailure(
                isPlaylist: isPlaylist,
                upstreamStatus: finalStatus,
@@ -368,7 +373,10 @@ actor StreamProxyServer {
             throw PolluxError.proxyStartFailed("The upstream stream server returned an invalid response.")
         }
 
-        if isPlaylist {
+        // Only rewrite a playlist body when the upstream actually returned one (2xx). A failed playlist
+        // fetch with no valid cached fallback must surface its real error status with the raw body — not
+        // be run through the rewriter, which would turn an HTML error page into bogus segment URLs.
+        if isPlaylist, finalResponse.statusCode == 200 || finalResponse.statusCode == 206 {
             return try playlistResponse(
                 from: responseBodyData,
                 playlistURL: targetURL,

@@ -106,7 +106,7 @@ extension PolluxError {
     }
 }
 
-enum StreamKind: String, Sendable {
+enum StreamKind: String, Codable, Sendable {
     case hls
     case mp4
     case mov
@@ -235,7 +235,7 @@ enum StreamKind: String, Sendable {
     }
 }
 
-struct BrowserCookie: Sendable {
+struct BrowserCookie: Codable, Hashable, Sendable {
     let name: String
     let value: String
     let domain: String
@@ -273,6 +273,9 @@ struct ExtractedStream: Sendable {
     let cachedPlaylists: [String: String]
     let excludedVariantURLs: Set<String>
     let notice: String?
+    /// Cookies captured from the browser at extraction time. Retained (separately from the merged
+    /// Cookie header) so a stream can be persisted and recalled later — see `StreamRecord`.
+    let cookies: [BrowserCookie]
     let session: BrowserSession?
 
     init(
@@ -283,6 +286,7 @@ struct ExtractedStream: Sendable {
         cachedPlaylists: [String: String],
         excludedVariantURLs: Set<String> = [],
         notice: String?,
+        cookies: [BrowserCookie] = [],
         session: BrowserSession? = nil
     ) {
         self.sourcePageURL = sourcePageURL
@@ -292,7 +296,84 @@ struct ExtractedStream: Sendable {
         self.cachedPlaylists = cachedPlaylists
         self.excludedVariantURLs = excludedVariantURLs
         self.notice = notice
+        self.cookies = cookies
         self.session = session
+    }
+}
+
+/// A persistable snapshot of a successfully extracted stream — everything needed to resume playback
+/// later without re-running the browser extraction. The live browser `session` is intentionally not
+/// captured; a recalled record plays over direct connections using the stored headers and cookies.
+///
+/// Note: this stores the captured request headers and cookies (which can include short-lived auth
+/// tokens) on disk. A recalled record therefore only plays while those tokens remain valid; for
+/// token-in-URL streams that is the token's lifetime, and for cookie-authorized streams the cookies
+/// must still be accepted by the CDN.
+struct StreamRecord: Codable, Identifiable, Hashable, Sendable {
+    let id: UUID
+    let createdAt: Date
+    let sourcePageURL: String
+    let streamURL: String
+    let kind: StreamKind
+    let headers: [String: String]
+    let cookies: [BrowserCookie]
+    let cachedPlaylists: [String: String]
+    let excludedVariantURLs: [String]
+    let notice: String?
+
+    /// A short human-facing label for a future library UI: the source page's last path component (or
+    /// host), falling back to the stream URL.
+    var title: String {
+        if let url = safeURL(from: sourcePageURL) {
+            let last = url.pathComponents.last { !$0.isEmpty && $0 != "/" }
+            if let last, !last.isEmpty, last != url.host {
+                return last
+            }
+            if let host = url.host {
+                return host
+            }
+        }
+        return streamURL
+    }
+}
+
+extension ExtractedStream {
+    /// Snapshot this stream into a persistable record (dropping the live browser session).
+    func makeRecord(id: UUID = UUID(), createdAt: Date = Date()) -> StreamRecord {
+        StreamRecord(
+            id: id,
+            createdAt: createdAt,
+            sourcePageURL: sourcePageURL.absoluteString,
+            streamURL: streamURL.absoluteString,
+            kind: kind,
+            headers: headers,
+            cookies: cookies,
+            cachedPlaylists: cachedPlaylists,
+            excludedVariantURLs: Array(excludedVariantURLs),
+            notice: notice
+        )
+    }
+}
+
+extension StreamRecord {
+    /// Rebuild a playable stream from a stored record for the fast path — no browser session, so
+    /// playback uses the stored headers/cookies over direct connections. Returns nil if the stored
+    /// URLs no longer parse.
+    func makeExtractedStream() -> ExtractedStream? {
+        guard let source = safeURL(from: sourcePageURL), let stream = safeURL(from: streamURL) else {
+            return nil
+        }
+        return ExtractedStream(
+            sourcePageURL: source,
+            streamURL: stream,
+            headers: headers,
+            kind: kind,
+            cachedPlaylists: cachedPlaylists,
+            excludedVariantURLs: Set(excludedVariantURLs),
+            notice: notice,
+            cookies: cookies,
+            session: nil
+        )
     }
 }
 
@@ -307,6 +388,11 @@ enum PolluxPreferences {
     static let captureRetryBudgetKey = "pollux.captureRetryBudgetSeconds"
     /// Recently opened stream page URLs, backing the File ▸ Open Recent menu.
     static let recentStreamsKey = "pollux.recentStreams"
+    /// JSON-encoded `[StreamRecord]` library of previously extracted streams, used to fast-path
+    /// resumption of playback without launching Chromium. See `StreamLibraryStore`.
+    static let streamLibraryKey = "pollux.streamLibrary"
+    /// How many previous streams to retain (0, 5, 20, or 50; default 20). Backs the Settings picker.
+    static let streamLibraryRetentionKey = "pollux.streamLibraryRetention"
     /// Launch the extraction browser with a visible (headful) window instead of headless. Some sites
     /// detect headless Chromium and serve a black/blocked page; a real window can bypass that.
     static let headfulExtractionKey = "pollux.headfulExtraction"
@@ -467,8 +553,20 @@ func canonicalizedHeaders(_ captured: [String: String], sourcePageURL: URL, user
     if cleaned["Referer"] == nil {
         cleaned["Referer"] = sourcePageURL.absoluteString
     }
-    if cleaned["Origin"] == nil, let scheme = sourcePageURL.scheme, let host = sourcePageURL.host {
-        cleaned["Origin"] = "\(scheme)://\(host)"
+    if cleaned["Origin"] == nil {
+        // A stream request from a cross-origin player iframe carries the iframe's origin, not the top
+        // page's — and the captured Referer reflects that embedding context (e.g. an embed host),
+        // whereas the source page is the site the user pasted. Derive Origin from the Referer's origin
+        // so it stays consistent with it; sending the top page's origin instead can trip CDN origin
+        // checks and 403 the fetch. Fall back to the source page only when there is no usable Referer.
+        if let referer = cleaned["Referer"],
+           let refererURL = URL(string: referer),
+           let scheme = refererURL.scheme,
+           let host = refererURL.host {
+            cleaned["Origin"] = "\(scheme)://\(host)"
+        } else if let scheme = sourcePageURL.scheme, let host = sourcePageURL.host {
+            cleaned["Origin"] = "\(scheme)://\(host)"
+        }
     }
     return cleaned
 }

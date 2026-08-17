@@ -141,6 +141,7 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     cachedPlaylists: cachedPlaylists,
                     excludedVariantURLs: selection.excludedVariantURLs,
                     notice: selection.notice,
+                    cookies: cookies,
                     session: releaseBrowser ? nil : session
                 )
             }
@@ -257,7 +258,11 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                         timeout: settings.playlistFetchTimeout
                     ),
                     !fetched.isEmpty,
-                    !isBrowserFetchError(fetched)
+                    !isBrowserFetchError(fetched),
+                    // Only cache real playlists. A CDN can 403 the browser fetch at extraction time and
+                    // return an HTML error page (non-empty, not the "ERROR:" sentinel); caching that
+                    // would later be served as bogus segments, spinning the player forever.
+                    looksLikeHLSPlaylistText(fetched)
                 else {
                     continue
                 }
