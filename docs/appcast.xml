@@ -1,0 +1,14 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Pollux</title>
+        <item>
+            <title>0.3.0</title>
+            <pubDate>Sun, 16 Aug 2026 21:20:46 -0400</pubDate>
+            <sparkle:version>3</sparkle:version>
+            <sparkle:shortVersionString>0.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/mabino/pollux/releases/download/v0.3.0/Pollux-v0.3.0.dmg" length="4221718" type="application/octet-stream" sparkle:edSignature="PdLBRxBLeRfBqiJIrv7gu/igvN9fKVvJJKST7SwPK4EfRcEg7+/dEwkKk/0+L7iQQIpHSzfkfizpGJ6eGsowDw=="/>
+        </item>
+    </channel>
+</rss>
