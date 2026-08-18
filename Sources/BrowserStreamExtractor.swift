@@ -158,18 +158,42 @@ final class BrowserStreamExtractor: @unchecked Sendable {
                     await session.clickPlayButtons()
                     ExtractionLogger.log("Response-Relay Mode active: serving the player's captured media. Keeping the in-page player alive to feed the live window.")
                     // Keep-alive loop: a live stream only advances while the in-page player keeps playing
-                    // and pulling new segments (which the relay mirrors). Every 3s, re-assert playback by
-                    // resuming any paused <video> in the player's own session; log a lightweight relay
-                    // heartbeat every ~30s. Exit cleanly once the browser is gone (the nudge fails).
+                    // and pulling new segments (which the relay mirrors). A *hidden* renderer (headless,
+                    // or a backgrounded window) gets its timers/media pipeline throttled after ~a minute
+                    // and stalls even though capture + request-signing still work — so every 3s we
+                    // (a) re-assert the page-lifecycle "active" state on the root and player targets to
+                    // defeat that throttle, (b) resume any paused <video> in the player's session, and
+                    // (c) dispatch a bare pointer-move as an extra activity signal. Log a lightweight
+                    // heartbeat every ~30s. Exit cleanly once the browser is gone (the nudges fail).
+                    let centerX = profile.centerX
+                    let centerY = profile.centerY
                     Task.detached {
                         var idleFailures = 0
                         var tick = 0
                         while idleFailures < 5 {
                             try? await Task.sleep(nanoseconds: 3_000_000_000)
+                            await session.keepTargetActive(inSession: nil)
                             if let playerSession = await relay.playerSession() {
+                                await session.keepTargetActive(inSession: playerSession)
                                 let alive = await session.resumePausedVideos(inSession: playerSession)
                                 idleFailures = alive ? 0 : idleFailures + 1
+
+                                // Actively poll the media playlist ourselves (through the player's own
+                                // session, so signed/anti-leech playlists still authorize) rather than
+                                // relying on the in-page player's refresh cadence. A throttled headless
+                                // renderer refreshes slowly and misses segments that slide out of the
+                                // source's live window between its polls, leaving gaps the timeline can't
+                                // bridge — which AVPlayer plays as a ~once-a-minute skip. Polling every 3s
+                                // captures every segment before the window slides past it.
+                                if let playlistURL = await relay.mediaPlaylistPollURL(),
+                                   let text = await session.fetchTextResourceInSession(at: playlistURL, sessionId: playerSession, timeout: 8),
+                                   !text.isEmpty {
+                                    await relay.recordMediaTimeline(fromMediaPlaylist: Data(text.utf8), playlistURL: playlistURL)
+                                }
                             }
+                            // Jitter the pointer a few px so successive moves aren't deduplicated as no-ops.
+                            let jitter = Double(tick % 4)
+                            await session.nudgePointerActivity(x: centerX + jitter, y: centerY + jitter)
                             if tick % 10 == 0 {
                                 let line = await relay.statsLine()
                                 ExtractionLogger.log(line)

@@ -51,12 +51,19 @@ final class ChromiumProcessTracker: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         sessions[id] = TrackedSession(process: process, userDataDirectory: userDataDirectory)
+        // While a Chromium session is alive, forbid sudden termination so macOS can't kill Pollux via
+        // exit()/SIGKILL without running our termination handlers — which is what leaves a silent zombie
+        // browser behind on quit. Re-enabled (reference-counted) as each session is torn down.
+        ProcessInfo.processInfo.disableSuddenTermination()
     }
 
     func unregister(id: UUID) {
         lock.lock()
-        defer { lock.unlock() }
-        sessions.removeValue(forKey: id)
+        let existed = sessions.removeValue(forKey: id) != nil
+        lock.unlock()
+        if existed {
+            ProcessInfo.processInfo.enableSuddenTermination()
+        }
     }
 
     func terminateSession(id: UUID) {
@@ -65,13 +72,8 @@ final class ChromiumProcessTracker: @unchecked Sendable {
         lock.unlock()
 
         if let tracked {
-            if tracked.process.isRunning {
-                tracked.process.terminate()
-            }
-            // Hard-kill the whole Chromium process tree (main + renderer/gpu/network helpers), which a
-            // plain terminate() on the parent does not reliably reap, then delete the profile.
-            Self.killProcessTree(userDataDirectory: tracked.userDataDirectory)
-            try? FileManager.default.removeItem(at: tracked.userDataDirectory)
+            teardown(tracked)
+            ProcessInfo.processInfo.enableSuddenTermination()
         }
     }
 
@@ -86,12 +88,20 @@ final class ChromiumProcessTracker: @unchecked Sendable {
         lock.unlock()
 
         for tracked in allSessions {
-            if tracked.process.isRunning {
-                tracked.process.terminate()
-            }
-            Self.killProcessTree(userDataDirectory: tracked.userDataDirectory)
-            try? FileManager.default.removeItem(at: tracked.userDataDirectory)
+            teardown(tracked)
+            ProcessInfo.processInfo.enableSuddenTermination()
         }
+    }
+
+    /// Terminates one tracked browser and reaps its whole process tree, then removes its profile.
+    private func teardown(_ tracked: TrackedSession) {
+        if tracked.process.isRunning {
+            tracked.process.terminate()
+        }
+        // Hard-kill the whole Chromium process tree (main + renderer/gpu/network/audio helpers), which a
+        // plain terminate() on the parent does not reliably reap, then delete the profile.
+        Self.killProcessTree(userDataDirectory: tracked.userDataDirectory)
+        try? FileManager.default.removeItem(at: tracked.userDataDirectory)
     }
 
     /// Removes leftover extraction browsers from previous runs (e.g. after a crash or force-quit).
@@ -243,17 +253,32 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
         // Headful mode (opt-in): launch a real, visible window instead of headless so sites that
         // detect and block headless Chromium still render their player. Response-Relay Mode forces it
         // on, since the relay only works while the in-page player actually renders and keeps fetching.
-        let headful = UserDefaults.standard.bool(forKey: PolluxPreferences.headfulExtractionKey)
-            || UserDefaults.standard.bool(forKey: PolluxPreferences.mediaRelayKey)
+        let relayMode = UserDefaults.standard.bool(forKey: PolluxPreferences.mediaRelayKey)
+        let environment = ProcessInfo.processInfo.environment
+        // Headless-new relay probe (#5): headless-new *does* run a real renderer + Service Worker + WASM,
+        // so the anti-leech signing might survive without a visible window. Off by default (the site may
+        // gate on visibility/focus); flip POLLUX_RELAY_HEADLESS=1 to test whether relay works headless.
+        let headlessRelayProbe = relayMode && environment["POLLUX_RELAY_HEADLESS"] == "1"
+        let headful = (UserDefaults.standard.bool(forKey: PolluxPreferences.headfulExtractionKey) || relayMode)
+            && !headlessRelayProbe
         // Anti-automation mitigation (opt-in "quiet CDP" path): active at the Standard level, off
         // otherwise. See `AntiAutomationLevel` for what the mitigation changes at launch and over CDP.
         let mitigation = AntiAutomationLevel.resolved() == .standard
+
+        if headlessRelayProbe {
+            ExtractionLogger.log("Response-Relay Mode: headless-new probe active (POLLUX_RELAY_HEADLESS=1) — launching without a visible window.")
+        }
+
+        // Mute the relay browser by default — it's a background capture engine, and its audio just
+        // duplicates what AVPlayer plays. Opt out with POLLUX_RELAY_UNMUTE=1 for debugging.
+        let muteAudio = relayMode && environment["POLLUX_RELAY_UNMUTE"] != "1"
 
         process.arguments = launchArguments(
             profile: profile,
             userDataDirectory: userDataDirectory,
             headful: headful,
-            mitigation: mitigation
+            mitigation: mitigation,
+            muteAudio: muteAudio
         )
 
         do {
@@ -301,7 +326,8 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
         profile: BrowserProfile,
         userDataDirectory: URL,
         headful: Bool,
-        mitigation: Bool
+        mitigation: Bool,
+        muteAudio: Bool = false
     ) -> [String] {
         var arguments = [
             "--remote-debugging-port=0",
@@ -332,6 +358,12 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
         // from an isolated world granted universal access, which keeps capture working without the tell.
         if !mitigation {
             arguments.append("--disable-web-security")
+        }
+        // Silence audio *output* only — media elements keep playing/decoding/buffering, so the relay is
+        // unaffected. Used in Response-Relay Mode where the browser is a background capture engine and
+        // its audio would just be a duplicate of what AVPlayer renders.
+        if muteAudio {
+            arguments.append("--mute-audio")
         }
         if !headful {
             arguments.append("--headless=new")
@@ -441,6 +473,33 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
         } catch {
             return false
         }
+    }
+
+    /// Forces a target out of the throttled/frozen page-lifecycle state that Chromium applies to a
+    /// hidden renderer (headless, or a window macOS has backgrounded). Left unchecked, a hidden player's
+    /// timer-driven fetch/append loop slows to a crawl after ~a minute and the stream stalls even though
+    /// capture and request-signing still work. Re-asserting `active` on a timer keeps the loop running.
+    /// Best-effort; the root call (`sessionId == nil`) is the effective one, and passing the player's
+    /// child session additionally thaws the out-of-process player iframe when its target allows it.
+    @discardableResult
+    func keepTargetActive(inSession sessionId: String?) async -> Bool {
+        do {
+            _ = try await connection.call("Page.setWebLifecycleState", params: ["state": "active"], sessionId: sessionId)
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    /// Dispatches a bare pointer-move (no button) to simulate user activity, reinforcing the "this page
+    /// is active" signal for a hidden renderer. Move-only — never a click — so it can't accidentally
+    /// toggle the player's play/pause UI. Best-effort.
+    func nudgePointerActivity(x: Double, y: Double) async {
+        _ = try? await connection.call("Input.dispatchMouseEvent", params: [
+            "type": "mouseMoved",
+            "x": x,
+            "y": y,
+        ])
     }
 
     func clickPlayButtons() async {
@@ -610,6 +669,34 @@ final class ChromeBrowserSession: BrowserSession, @unchecked Sendable {
             return (nil, "undecodable body (\(result.count) chars)")
         }
         return (data, nil)
+    }
+
+    /// Fetches a text resource by running `fetch` inside a specific child-target session (the player
+    /// iframe), so a signed/anti-leech media playlist is retrieved through that origin's Service Worker
+    /// just like its segments. Used by Response-Relay Mode to actively poll the media playlist at a fixed
+    /// cadence — independent of how often the (possibly throttled) in-page player refreshes it — so the
+    /// synthetic timeline captures every segment before the source's live window slides past it. Returns
+    /// nil on any error so the caller can simply skip that poll tick.
+    func fetchTextResourceInSession(at url: URL, sessionId: String?, timeout: TimeInterval) async -> String? {
+        let script = browserFetchScript(
+            url: url,
+            timeout: timeout,
+            timeoutMessage: "playlist poll timed out",
+            fetchOptions: "{ signal: controller.signal, cache: 'no-store', credentials: 'include' }",
+            readBody: """
+            if (!response.ok) { clearTimeout(timeoutId); return "ERROR: HTTP " + response.status; }
+                clearTimeout(timeoutId);
+                return await response.text();
+            """
+        )
+        let result: String?
+        do {
+            result = try await evaluateString(script, inSession: sessionId, timeout: timeout + 8)
+        } catch {
+            return nil
+        }
+        guard let result, !isBrowserFetchError(result) else { return nil }
+        return result
     }
 
     /// Fetches a network response body the browser has already buffered, by CDP request id. Used to

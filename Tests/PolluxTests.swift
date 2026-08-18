@@ -456,6 +456,27 @@ final class PolluxTests: XCTestCase {
         XCTAssertEqual(closeCount, 1, "An owned session must be closed exactly once on teardown.")
     }
 
+    func testProxyStopIsIdempotent() async throws {
+        // stop() must be safe to call more than once (app teardown + listener-failure + owned-session
+        // paths can all fire it). The `stopped` guard also prevents a second `session.invalidateAndCancel`
+        // and any late upstream fetch from creating a task on the invalidated session (an uncatchable
+        // NSException that aborted the app). An owned session must still close exactly once.
+        let spy = SpyBrowserSession()
+        let proxy = try StreamProxyServer(stream: makeStream(session: spy), ownsSession: true)
+
+        await proxy.stop()
+        await proxy.stop()
+        await proxy.stop()
+
+        var closeCount = 0
+        for _ in 0..<100 {
+            closeCount = await spy.closeCount
+            if closeCount > 0 { break }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(closeCount, 1, "Repeated stop() must close an owned session exactly once.")
+    }
+
     // MARK: - End-to-end proxy integration (opt-in, hits the public internet)
 
     /// Drives a real `StreamProxyServer` against a known-stable public HLS stream and asserts the
@@ -636,6 +657,20 @@ final class PolluxTests: XCTestCase {
             profile: testProfile(), userDataDirectory: dir, headful: true, mitigation: true
         )
         XCTAssertFalse(headful.contains("--headless=new"))
+    }
+
+    func testLaunchArgumentsMutesAudioOnlyWhenRequested() {
+        let dir = URL(fileURLWithPath: "/tmp/pollux-test-profile")
+        // Muting silences output only; media keeps playing, so it's safe for the relay. Off by default.
+        let unmuted = ChromeBrowserSession.launchArguments(
+            profile: testProfile(), userDataDirectory: dir, headful: true, mitigation: false
+        )
+        XCTAssertFalse(unmuted.contains("--mute-audio"))
+        let muted = ChromeBrowserSession.launchArguments(
+            profile: testProfile(), userDataDirectory: dir, headful: true, mitigation: false,
+            muteAudio: true
+        )
+        XCTAssertTrue(muted.contains("--mute-audio"))
     }
 
     func testHardenedStealthScriptPatchesKnownHeadlessTells() {

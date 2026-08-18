@@ -199,6 +199,13 @@ actor MediaRelay {
         return (entry.data, entry.contentType, url)
     }
 
+    /// The media-playlist URL to actively poll so the timeline captures every segment regardless of how
+    /// often (or slowly, when throttled) the in-page player refreshes it. nil until a media playlist has
+    /// been seen. Prefers the timeline's own base, falling back to the last captured media playlist.
+    func mediaPlaylistPollURL() -> URL? {
+        timelineBaseURL ?? currentMediaPlaylistURL.flatMap { URL(string: $0) }
+    }
+
     /// A synthetic live media playlist built from the growing segment timeline — a stable window that
     /// only ever advances, so AVPlayer follows it continuously instead of stalling when the player's raw
     /// snapshot slides out from under it. Falls back to nil (proxy then serves `currentMediaPlaylist`)

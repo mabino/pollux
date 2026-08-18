@@ -15,6 +15,12 @@ actor StreamProxyServer {
     private var readyContinuation: CheckedContinuation<Void, Error>?
     private var connections: [UUID: NWConnection] = [:]
     private var started = false
+    /// Set once `stop()` has invalidated `session`. Creating a URLSession task on an invalidated session
+    /// throws an *Objective-C* `NSException` ("Task created in a session that has been invalidated") that
+    /// Swift cannot catch — it aborts the whole app. A late in-flight connection can resume on the actor
+    /// after teardown and reach the upstream fetch, so we guard that call with this flag. Checked and
+    /// used with no `await` in between, so the actor cannot invalidate the session across the guard.
+    private var stopped = false
 
     /// - Parameter ownsSession: Whether stopping this proxy should also close the shared Chrome
     ///   browser session. The playback proxy owns the session (closing it tears down Chrome when
@@ -73,6 +79,8 @@ actor StreamProxyServer {
     }
 
     func stop() {
+        guard !stopped else { return }
+        stopped = true
         listener.cancel()
         let existingConnections = connections.values
         connections.removeAll()
@@ -328,7 +336,14 @@ actor StreamProxyServer {
         
         var responseBodyData: Data = Data()
         var httpResponse: HTTPURLResponse?
-        
+
+        // Bail before touching the URLSession if the proxy is being torn down — creating a task on an
+        // invalidated session throws an uncatchable NSException. No `await` between this guard and the
+        // fetch, so `stop()` cannot invalidate the session in between (both run on this actor).
+        guard !stopped else {
+            throw PolluxError.proxyStartFailed("The playback proxy is shutting down.")
+        }
+
         do {
             let (body, urlResponse) = try await session.data(for: upstreamRequest)
             if let httpResp = urlResponse as? HTTPURLResponse {
