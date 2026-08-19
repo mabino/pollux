@@ -3,6 +3,14 @@
     <channel>
         <title>Pollux</title>
         <item>
+            <title>0.6.0</title>
+            <pubDate>Tue, 18 Aug 2026 20:05:59 -0400</pubDate>
+            <sparkle:version>6</sparkle:version>
+            <sparkle:shortVersionString>0.6.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/mabino/pollux/releases/download/v0.6.0/Pollux-v0.6.0.dmg" length="4240435" type="application/octet-stream" sparkle:edSignature="uamvASH8TWuAepV40hQFsCbRlv6a4mvBN+7TMNAdlXuyL3aAskHCx9E+naGvp9QkTGktFFPcrxQYePXMMUSxDg=="/>
+        </item>
+        <item>
             <title>0.4.0</title>
             <pubDate>Sun, 16 Aug 2026 22:29:19 -0400</pubDate>
             <sparkle:version>4</sparkle:version>
